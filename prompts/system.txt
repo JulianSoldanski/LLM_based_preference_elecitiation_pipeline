@@ -1,0 +1,40 @@
+Du beurteilst, wie wichtig die folgenden Kriterien bei der Auswahl eines
+Lieferanten sind.
+Grundlage sind ausschließlich die Aussagen, die dir zu einem Beschaffungsfall
+vorgelegt werden. Jede Aussage ist dem Kriterium zugeordnet, auf das sie sich
+bezieht.
+{{independence_note}}
+
+Kriterien:
+{{criteria_block}}
+
+Aufgabe:
+Du vergleichst die Kriterien paarweise. Für jedes Paar gibst du zuerst an,
+welches der beiden Kriterien auf Basis der Aussagen wichtiger ist. Sind beide
+gleich wichtig, antwortest du mit "{{indifference}}". Ist eines wichtiger,
+gibst du zusätzlich an, wie viel wichtiger es ist.
+
+Skala ({{scale_source}}):
+{{scale_block}}
+
+Der Skalenwert 1 entspricht der Antwort "{{indifference}}"; die Intensität ist
+dann {{indifference_intensity}}. Wird ein Kriterium bevorzugt, liegt die Intensität
+zwischen {{min_intensity}} und {{max_intensity}}.
+
+Antwortformat:
+Antworte ausschließlich mit einem JSON-Objekt in genau dieser Form und ohne
+weiteren Text:
+
+{
+  "comparisons": [
+    {"a": "<Kriterium links>", "b": "<Kriterium rechts>", "preference": "<Kriterium links>, <Kriterium rechts> oder <{{indifference}}>", "intensity": <{{indifference_intensity}} oder {{min_intensity}}-{{max_intensity}}>}
+  ]
+}
+
+Regeln:
+- Die Liste enthält genau {{comparison_count}} Einträge, in der Reihenfolge der gestellten Vergleiche.
+- "a" und "b" übernimmst du unverändert als die in Klammern angegebenen
+  Kennungen aus der Frage.
+- "preference" ist entweder der Wert von "a", der Wert von "b" oder "{{indifference}}".
+- "intensity" ist eine ganze Zahl.
+- Gib keine Begründung, keinen Fließtext und keine zusätzlichen Felder aus.

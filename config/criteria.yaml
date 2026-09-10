@@ -1,0 +1,38 @@
+# Kriterienbeschreibungen.
+# Bewusst getrennt vom Agenten: langfristig Teil der Wissensbasis, nicht der
+# Agentenlogik. Der Agent laedt sie ueber den PromptBuilder.
+#
+# WICHTIG: Der Wortlaut muss exakt dem entsprechen, was die Probanden im
+# Fragebogen gesehen haben. Keine Umschrift von Umlauten.
+
+criteria:
+  - id: liefertreue
+    name: Liefertreue
+    description: >-
+      Wie zuverlässig der Lieferant die vereinbarte Menge und Qualität zum
+      zugesagten Zeitpunkt liefert. Dazu gehören insbesondere die Einhaltung
+      zugesagter Liefertermine und die Zeit vom Auftrag bis zur Verfügbarkeit
+      der Ware.
+
+  - id: flexibilitaet
+    name: Flexibilität
+    description: >-
+      Wie schnell und in welchem Umfang der Lieferant auf Veränderungen
+      reagieren kann. Dazu gehören insbesondere die Reaktion auf ungeplante
+      Änderungen sowie die Möglichkeit, Produktionsmengen kurzfristig zu
+      erhöhen oder zu reduzieren.
+
+  - id: kosten
+    name: Kosten
+    description: >-
+      Die gesamte wirtschaftliche Belastung, die durch die Zusammenarbeit mit
+      dem Lieferanten entsteht. Dazu gehören beispielsweise Bestell-,
+      Transport-, Handling- und Verwaltungskosten sowie Kosten durch
+      Gewährleistungsfälle und Rücksendungen.
+
+# Reihenfolge der Paarvergleiche. Zyklisch balanciert: jedes Kriterium
+# erscheint genau einmal links und einmal rechts.
+comparison_order:
+  - [flexibilitaet, liefertreue]
+  - [kosten, flexibilitaet]
+  - [liefertreue, kosten]

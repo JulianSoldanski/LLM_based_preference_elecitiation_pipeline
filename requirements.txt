@@ -1,0 +1,6 @@
+# Erhebung: PyYAML für die Wissensbasis, openai als Standard-Anbieter.
+pyyaml>=6.0
+openai>=1.0
+
+# Nur nötig, wenn --provider anthropic genutzt wird:
+# anthropic>=0.40

@@ -1,0 +1,9 @@
+{{scenario_intro}}
+
+{{case_title}}
+
+Aussagen aus dem Beschaffungsteam zum Bauteil {{component}}:
+{{statements_block}}
+
+Bitte fülle auf dieser Grundlage die folgenden {{comparison_count}} Paarvergleiche aus:
+{{comparison_block}}

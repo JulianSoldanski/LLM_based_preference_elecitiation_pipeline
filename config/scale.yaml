@@ -1,0 +1,24 @@
+# AHP-Fundamentalskala, in Anlehnung an Saaty (1980).
+# Getrennt gehalten, damit Skalenvarianten (z.B. 1-5) ohne Eingriff in den
+# Agenten getestet werden koennen.
+
+scale:
+  source: "In Anlehnung an Saaty (1980)"
+  min: 1
+  max: 9
+  levels:
+    - values: "1"
+      label: "Gleich wichtig"
+      explanation: "Beide Kriterien haben die gleiche Bedeutung (Indifferenz)"
+    - values: "2-3"
+      label: "Etwas wichtiger"
+      explanation: "Die Aussagen sprechen für eine etwas größere Bedeutung"
+    - values: "4-5"
+      label: "Spürbar wichtiger"
+      explanation: "Die Aussagen sprechen für eine spürbar größere Bedeutung"
+    - values: "6-7"
+      label: "Viel wichtiger"
+      explanation: "Die Aussagen sprechen für eine viel größere Bedeutung"
+    - values: "8-9"
+      label: "Extrem viel wichtiger"
+      explanation: "Größtmöglicher Bedeutungsunterschied"

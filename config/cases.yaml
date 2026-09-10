@@ -1,0 +1,79 @@
+scenario:
+  company: Bike Inc.
+  intro: >-
+    Alle Aussagen stammen aus dem Beschaffungsteam von Bike Inc., einem fiktiven
+    Hersteller von E-Bikes. Das Unternehmen kauft verschiedene Bauteile bei
+    externen Lieferanten ein und muss sich dabei jeweils zwischen mehreren
+    Anbietern entscheiden.
+
+  # Hinweis, dass die Faelle unabhaengig voneinander sind. Steht in der
+  # Fragebogeninstruktion einmal in der Einleitung und deshalb hier einmal im
+  # System-Prompt -- nicht vor jedem Fall wiederholt.
+  #
+  # WICHTIG: Wortlaut exakt aus dem Fragebogen uebernehmen. Solange das Feld
+  # leer ist, erscheint der Satz nicht im Prompt; runner.py und experiment.py
+  # warnen in der History-Bedingung darauf hin.
+  independence_note: "x"
+
+cases:
+  - id: ketten
+    title: "Fall 1: Ketten"
+    component: Ketten
+    statement_order: [liefertreue, kosten, flexibilitaet]
+    statements:
+      liefertreue: >-
+        Die Kette sitzt auf dem kritischen Pfad der Montage. Es gibt zwar mehrere 
+        qualifizierte alternative Lieferanten, aber bis zum zugesagten Termin haben 
+        wir kaum Puffer. Bleibt die Lieferung aus, spüren wir das sofort in der Linie 
+        und können es nur zum Teil über Umdisponieren auffangen.
+      kosten: >-
+        Der Abwicklungsaufwand für Bestellung, Transport und Verwaltung fällt 
+        bei diesem Teil in jedem einzelnen Vorgang an, und über die hohe Stückzahl 
+        kommen laufend Gewährleistungs- und Rückläufervorgänge hinzu. Was ein 
+        Lieferant hier an Aufwand verursacht, summiert sich über das Jahr auf, 
+        ohne dass wir es an anderer Stelle auffangen könnten.
+      flexibilitaet: >-
+        Die Kettenspezifikation bleibt über Modellgenerationen unverändert, das
+        Variantenspektrum ist schmal, und die Abrufmengen stehen mit langem
+        Vorlauf fest. Damit tritt der Änderungsfall in dieser Beschaffung
+        praktisch nie ein – ein Lieferant mit geringer Anpassungsfähigkeit würde
+        im Betrieb schlicht nicht auffallen.
+
+  - id: batteriepacks
+    title: "Fall 2: Batteriepacks"
+    component: Batteriepacks
+    statement_order: [flexibilitaet, liefertreue, kosten]
+    statements:
+      flexibilitaet: >-
+        Die standardisierten Vorstufen der Batteriepacks entstehen früh, die konkrete Ausführung 
+        erst spät in der Montage. Als ein Lieferant beim Wechsel zwischen zwei Ausführungen nicht 
+        mitkam, stand die Endmontage mehrere Tage, und wir mussten Sonderschichten fahren, um 
+        das Auslieferprogramm noch zu halten.
+      liefertreue: >-
+        Die Standardteile liegen im Lager, weil die Gesamtmenge gut planbar 
+        ist, und das Pack wird erst spät in der Montage eingebaut. 
+        Kommt eine Lieferung zu spät, müssen wir umplanen, mehr passiert nicht.
+      kosten: >-
+        Reklamationen und Rückläufer aus dem Feld gibt es bei diesem Bauteil häufiger, 
+        die Abwicklungskosten fallen im Verhältnis zum Wert des Packs aber nicht stark ins Gewicht, 
+        trotzdem war der Betrag nicht zu vernachlässigen. 
+
+  - id: konnektivitaetsmodule
+    title: "Fall 3: Konnektivitätsmodule"
+    component: Konnektivitätsmodule
+    statement_order: [kosten, flexibilitaet, liefertreue]
+    statements:
+      kosten: >-
+        Die Konnektivitätsmodule laufen in kleinen Stückzahlen je Variante 
+        und ziehen kaum Reklamationen oder Rückläufer nach sich. 
+        Es kommt schlicht zu wenig zusammen, als dass sich Unterschiede in der
+        Abwicklung eines Lieferanten bei uns bemerkbar machen würden.
+      flexibilitaet: >-
+        Bei den Konnektivitätsmodulen ist die Nachfrage je Variante kaum vorhersagbar
+        , und neue Modultypen lösen sich schon innerhalb des Modelljahrs ab. 
+        Wer Mengen und Änderungsstände nicht kurzfristig mitzieht, 
+        hält uns die Konfigurationen auf, und nichts im Ablauf federt das ab.
+      liefertreue: >-
+        Der Einbau des Moduls liegt spät in der Montagefolge, und bei einem Ausfall 
+        lässt sich oft auf eine andere Ausführung ausweichen. Bleibt ein zugesagter 
+        Termin offen, gehen Räder unfertig weiter und müssen nachgerüstet werden.
