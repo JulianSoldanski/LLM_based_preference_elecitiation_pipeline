@@ -26,7 +26,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="runner.py",
         description="Erhebt AHP-Paarvergleiche eines LLM zu den konfigurierten Fällen.",
     )
-    parser.add_argument("--provider", choices=["openai", "anthropic"], default="openai")
+    parser.add_argument("--provider", choices=["openai", "anthropic", "mistral"], default="openai")
     # History ist die Hauptbedingung, stateless die Kontrolle.
     parser.add_argument(
         "--condition",

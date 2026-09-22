@@ -13,9 +13,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-from agent import AhpAgent, EchoClient, build_client, load_env, require_key
+from agent import AhpAgent, EchoClient, MistralClient, build_client, load_env, require_key
 from experiment import run_experiment
 from prompt_builder import ConfigError, PromptBuilder
 from runner import case_sequences, default_out_path, resolve_seed
@@ -286,6 +287,21 @@ class AgentVerhaltenTest(unittest.TestCase):
         self.assertEqual(client.provider, "echo")
         with self.assertRaises(ValueError):
             build_client("gibtesnicht", "x")
+
+    def test_mistral_client_uebernimmt_nur_antworttext(self) -> None:
+        # Mit Reasoning liefert Mistral Chunks statt eines Strings.
+        chunks = [
+            SimpleNamespace(type="thinking", thinking=[]),
+            SimpleNamespace(type="text", text=GUELTIGE_ANTWORT),
+        ]
+        for content, erwartet in ((GUELTIGE_ANTWORT, GUELTIGE_ANTWORT), (chunks, GUELTIGE_ANTWORT), (None, "")):
+            antwort = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+            client = object.__new__(MistralClient)
+            client.model_id = "mistral-test"
+            client._client = SimpleNamespace(chat=SimpleNamespace(complete=lambda **_: antwort))
+            self.assertEqual(client.complete("system", "user", 0.0), erwartet)
 
 
 class SerialisierungTest(unittest.TestCase):

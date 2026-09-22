@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="experiment.py",
         description="Führt n dokumentierte Durchläufe über alle Fälle aus.",
     )
-    parser.add_argument("--provider", choices=["openai", "anthropic"], default="openai")
+    parser.add_argument("--provider", choices=["openai", "anthropic", "mistral"], default="openai")
     parser.add_argument("--model", required=True, help="Modell-ID des Anbieters")
     parser.add_argument(
         "--condition",

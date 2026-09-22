@@ -139,6 +139,40 @@ class AnthropicClient:
 
 
 @dataclass
+class MistralClient:
+    """Analog zu OpenAIClient, SDK (mistralai>=2) ebenfalls erst im __post_init__."""
+
+    model_id: str
+    provider: str = "mistral"
+    _client: Any = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        load_env()
+        require_key("MISTRAL_API_KEY")
+        from mistralai.client import Mistral
+
+        self._client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+
+    def complete(self, system: str, user: str, temperature: float) -> str:
+        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
+
+    def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
+        completion = self._client.chat.complete(
+            model=self.model_id,
+            temperature=temperature,
+            messages=[{"role": "system", "content": system}, *messages],
+        )
+        content = completion.choices[0].message.content
+        # Bei aktiviertem Reasoning kommt eine Liste von Chunks statt eines
+        # Strings; übernommen wird wie bei Anthropic nur der Antworttext.
+        if isinstance(content, list):
+            return "".join(
+                chunk.text for chunk in content if getattr(chunk, "type", "") == "text"
+            )
+        return content or ""
+
+
+@dataclass
 class EchoClient:
     """Testdouble ohne Netzzugriff.
 
@@ -183,6 +217,8 @@ def build_client(provider: str, model: str, **kwargs: Any) -> LLMClient:
         return OpenAIClient(model_id=model)
     if key == "anthropic":
         return AnthropicClient(model_id=model)
+    if key == "mistral":
+        return MistralClient(model_id=model)
     if key == "echo":
         # Nur für Tests und Trockenläufe, nicht über die CLI erreichbar.
         return EchoClient(model_id=model, **kwargs)
