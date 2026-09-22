@@ -129,9 +129,13 @@ class AnthropicClient:
         message = self._client.messages.create(
             model=self.model_id,
             max_tokens=self.max_tokens,
-            temperature=temperature,
             system=system,
             messages=messages,
+            # SDK 1.x kennt temperature nicht mehr, die API nimmt sie bei
+            # älteren Modellen (z.B. Sonnet 4.6, Haiku 4.5) aber weiter an.
+            # Neuere Modelle (Sonnet 5, Opus 4.7+) antworten mit 400, statt
+            # still mit ihrem Default zu laufen und die Protokolle zu verfälschen.
+            extra_body={"temperature": temperature},
         )
         return "".join(
             block.text for block in message.content if getattr(block, "type", "") == "text"
