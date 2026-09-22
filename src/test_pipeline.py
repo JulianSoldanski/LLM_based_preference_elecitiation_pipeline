@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agent import AhpAgent, EchoClient, MistralClient, build_client, load_env, require_key
+from agent import AhpAgent, AnthropicClient, EchoClient, MistralClient, build_client, load_env, require_key
 from experiment import run_experiment
 from prompt_builder import ConfigError, PromptBuilder
 from runner import case_sequences, default_out_path, resolve_seed
@@ -287,6 +287,24 @@ class AgentVerhaltenTest(unittest.TestCase):
         self.assertEqual(client.provider, "echo")
         with self.assertRaises(ValueError):
             build_client("gibtesnicht", "x")
+
+    def test_anthropic_client_sendet_temperatur_ueber_extra_body(self) -> None:
+        # anthropic>=1.0 wirft TypeError bei temperature als Argument.
+        aufrufe: list[dict] = []
+        antwort = SimpleNamespace(content=[SimpleNamespace(type="text", text=GUELTIGE_ANTWORT)])
+
+        def create(**kwargs):
+            aufrufe.append(kwargs)
+            return antwort
+
+        client = object.__new__(AnthropicClient)
+        client.model_id = "claude-test"
+        client.max_tokens = 1024
+        client._client = SimpleNamespace(messages=SimpleNamespace(create=create))
+
+        self.assertEqual(client.complete("system", "user", 0.0), GUELTIGE_ANTWORT)
+        self.assertNotIn("temperature", aufrufe[0])
+        self.assertEqual(aufrufe[0]["extra_body"], {"temperature": 0.0})
 
     def test_mistral_client_uebernimmt_nur_antworttext(self) -> None:
         # Mit Reasoning liefert Mistral Chunks statt eines Strings.
