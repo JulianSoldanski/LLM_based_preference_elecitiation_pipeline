@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 .env
 results/
+showResults/figures
+showResults/results_rq3.tex
+showResults/runs.csv

@@ -1,0 +1,31 @@
+# Ground-Truth-Gewichte, aus denen die Faelle erzeugt wurden.
+#
+# Werte aus Tabelle 5.2 der Arbeit ("Strength levels and resulting ground-truth
+# weights used in the survey").
+#
+# ACHTUNG, Abweichung: Die Falldatei des Generators
+# (SyntheticDataGenerator/rootData/scor_cases_ebike_reduced.json) enthaelt fuer
+# lean und agile andere Werte -- dort steht 0.0667 statt 0.0500 und 0.6 statt
+# 0.6167. Der hybride Fall stimmt in beiden Quellen ueberein. Welche Zahlen
+# gelten, entscheidet die Arbeit; hier stehen die der Tabelle.
+#
+# Die Ids muessen zu denen in runs.csv passen.
+
+source: "Table 5.2, strength levels and resulting ground-truth weights"
+
+cases:
+  ketten:
+    strategy: Lean
+    liefertreue: 0.3333
+    flexibilitaet: 0.0500
+    kosten: 0.6167
+  batteriepacks:
+    strategy: Hybrid
+    liefertreue: 0.2000
+    flexibilitaet: 0.4667
+    kosten: 0.3333
+  konnektivitaetsmodule:
+    strategy: Agile
+    liefertreue: 0.3333
+    flexibilitaet: 0.6167
+    kosten: 0.0500

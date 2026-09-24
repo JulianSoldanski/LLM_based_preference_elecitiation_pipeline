@@ -81,7 +81,7 @@ src/        prompt_builder.py                       lädt + validiert + rendert
 results/    <provider>_<model>_<condition>.jsonl    Rohdaten (runner.py)
             <stempel>_<provider>_<model>_<cond>.json  Ergebnisse (experiment.py)
             <stempel>_<provider>_<model>_<cond>.log   Protokoll  (experiment.py)
-.env        OPENAI_API_KEY, ANTHROPIC_API_KEY       Zugangsdaten (nicht im Git)
+.env        OPENAI_/ANTHROPIC_/MISTRAL_API_KEY      Zugangsdaten (nicht im Git)
 ```
 
 Leitprinzip: **Der Agent kennt keine Fachinhalte.** Kriterien, Skala und
@@ -108,6 +108,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt          # pyyaml + openai
 pip install anthropic                    # nur für --provider anthropic
+pip install mistralai                    # nur für --provider mistral
 ```
 
 Die API-Schlüssel liegen in `.env` im Projektverzeichnis (per `.gitignore`
@@ -116,6 +117,7 @@ ausgeschlossen, Vorlage in `.env.example`):
 ```
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...      # nur für --provider anthropic
+MISTRAL_API_KEY=...               # nur für --provider mistral
 ```
 
 Die Datei wird beim Erzeugen eines Clients automatisch eingelesen; ein
@@ -144,6 +146,9 @@ python3 src/runner.py --model gpt-4o --runs 5 --condition stateless
 python3 src/runner.py --provider anthropic --model claude-opus-4-5 \
         --case ketten --temperature 0.7 --out results/pilot.jsonl
 
+# Mistral
+python3 src/experiment.py --provider mistral --model mistral-small-2603 --runs 10 --seed 42
+
 # Dokumentierter Durchlauf: 10 Wiederholungen über alle Fälle
 python3 src/experiment.py --model gpt-4o --runs 10 --seed 42
 
@@ -153,7 +158,7 @@ python3 src/test_pipeline.py
 
 | Option | Bedeutung |
 | --- | --- |
-| `--provider` | `openai` (Default) oder `anthropic` |
+| `--provider` | `openai` (Default), `anthropic` oder `mistral` |
 | `--condition` | `history` (Default) oder `stateless` |
 | `--seed` | Seed der Fallreihenfolge; nur in `history` wirksam |
 | `--model` | Modell-ID des Anbieters. Pflicht außer bei `--dry-run` |
