@@ -45,7 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--condition",
         choices=[CONDITION_HISTORY, CONDITION_STATELESS],
-        default=CONDITION_HISTORY,
+        default=CONDITION_STATELESS,
         help="history: alle Fälle in einer Konversation. stateless: ein Fall pro Aufruf.",
     )
     parser.add_argument(
