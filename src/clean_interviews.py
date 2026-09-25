@@ -1,8 +1,8 @@
 """Bereinigt den SoSci-Export des Fragebogens.
 
-Entfernt alle Teilnahmen, bei denen mindestens ein Paarvergleich fehlt oder
-die auf einer der Fallseiten (Seite 4-6) weniger als 30 Sekunden verbracht
-haben. Alles andere bleibt unverändert: gleiche Spalten, Beschriftungszeile,
+Entfernt alle Teilnahmen vor Nr. 160 sowie alle, bei denen mindestens ein
+Paarvergleich fehlt oder die auf einer der Fallseiten (Seite 4-6) weniger als
+30 Sekunden verbracht haben. Alles andere bleibt unverändert: gleiche Spalten, Beschriftungszeile,
 Werte und Format (UTF-8 mit BOM, Semikolon, CRLF).
 
     python3 src/clean_interviews.py results/InterviewResults/data_....csv
@@ -36,6 +36,9 @@ VERGLEICHE = {
 FALLSEITEN = {4: "TIME004", 5: "TIME005", 6: "TIME006"}
 MIN_SEKUNDEN = 30
 
+# Erste Teilnahme der Erhebung; fruehere Eintraege zaehlen nicht dazu.
+ERSTE_TEILNAHME = 160
+
 
 def fehlende_vergleiche(zeile: dict[str, str]) -> list[str]:
     """Fehlende Items einer Teilnahme; leer, wenn alle Vergleiche vollständig sind.
@@ -62,7 +65,8 @@ def zu_schnelle_seiten(zeile: dict[str, str]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Entfernt Teilnahmen mit fehlenden Paarvergleichen oder zu kurzer Verweildauer.")
+        description="Entfernt Teilnahmen vor Nr. 160, mit fehlenden Paarvergleichen "
+                    "oder zu kurzer Verweildauer.")
     parser.add_argument("export", type=Path, help="SoSci-CSV (data_*.csv)")
     parser.add_argument("--out", type=Path, help="Zieldatei (Default <export>_clean.csv)")
     args = parser.parse_args(argv)
@@ -79,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         fehlend = fehlende_vergleiche(werte)
         zu_schnell = zu_schnelle_seiten(werte)
-        if fehlend:
+        if int(werte["CASE"]) < ERSTE_TEILNAHME:
+            entfernt.append((werte["CASE"], f"vor Nr. {ERSTE_TEILNAHME}"))
+        elif fehlend:
             entfernt.append((werte["CASE"], "fehlt: " + ", ".join(fehlend)))
         elif zu_schnell:
             entfernt.append((werte["CASE"], f"unter {MIN_SEKUNDEN} s: " + ", ".join(zu_schnell)))
