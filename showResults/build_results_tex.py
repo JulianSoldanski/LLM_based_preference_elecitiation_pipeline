@@ -12,8 +12,10 @@ vergleicht sie, bewertet sie aber nicht.
 
 Aufbau des Abschnitts: Stichprobe und Modelllaeufe; RQ3 mit der Stabilitaet der
 Gewichte und der Konsistenz der Matrizen; Gewichtungsteil von RQ4 mit dem
-Abstand zu den Zielgewichten und zu den Probanden. Drei Tabellen, zwei
-Abbildungen.
+Vergleich der Modellgewichte mit den Probandengewichten. Die Zielgewichte aus
+ground_truth.yaml stehen nur als Zeile in der Gewichtstabelle und werden nicht
+verglichen. Sechs Tabellen (Stichprobe, Fallseiten, Paarvergleiche, Gewichte, CR,
+Vergleich), je Fall eine Abbildung der Gewichte und eine Abbildung der Rangfolgen.
 """
 
 from __future__ import annotations
@@ -31,11 +33,17 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
-from clean_interviews import (ERSTE_TEILNAHME, MIN_SEKUNDEN,  # noqa: E402
+from clean_interviews import (AUSREISSER, ERSTE_TEILNAHME, MIN_SEKUNDEN,  # noqa: E402
                               fehlende_vergleiche, zu_schnelle_seiten)
+from transform_interviews import FAELLE, REIHENFOLGE  # noqa: E402
 
 # Feste Reihenfolge der Kriterien; muss zu den Spalten in runs.csv passen.
 CRIT = ["liefertreue", "flexibilitaet", "kosten"]
+# Paarvergleiche in runs.csv, Spalte "a:b": Matrixeintrag a_ij, also die gewaehlte
+# Intensitaet, wenn a vorgezogen wurde, sonst ihr Kehrwert. Reihenfolge wie
+# PAIRS in auswertung.ipynb.
+PAIRS = list(itertools.combinations(CRIT, 2))
+PAIR_COLS = [f"{a}:{b}" for a, b in PAIRS]
 CRIT_LABEL = {
     "liefertreue": "Delivery reliability",
     "flexibilitaet": "Flexibility",
@@ -65,9 +73,6 @@ RANDOM_INDEX = "0.58"
 CR_THRESHOLD = 0.1
 # "Most runs" im Text heisst: mehr als dieser Anteil der Laeufe.
 MAJORITY = 0.5
-# Temperatur aller Modellaufrufe; steht hier nur fuer den Satz im Text und muss
-# mit den API-Aufrufen uebereinstimmen.
-TEMPERATURE = "0"
 # Erklaerung der Modellbedingung fuer den Satz zu den Modelllaeufen. Eine
 # Bedingung ohne Eintrag wird nur genannt, nicht erklaert.
 CONDITION_TEXT = {
@@ -91,6 +96,15 @@ LLM_SECTION = "subsec:parallel-llm"
 SURVEY = HERE.parent / "results" / "InterviewResults" / (
     "data_ahpsupplierselectionjs23_2026-09-19_12-33.csv")
 CONSENT_REFUSED = "1"                                        # SC01: Nein, nicht teilnehmen
+# Je Ausreisser aus AUSREISSER in clean_interviews.py: Fall und Kriterium, das
+# die Teilnahme dort auf Rang 1 setzt. Der Lauf bricht ab, wenn ein Eintrag
+# fehlt, das Kriterium bei den Behaltenen nicht im Mittel das niedrigste ist
+# oder eine behaltene Teilnahme das im Mittel niedrigste Kriterium vorn hat.
+OUTLIER_FIRST = {
+    "160": ("ketten", "flexibilitaet"),
+    "174": ("batteriepacks", "liefertreue"),
+    "164": ("konnektivitaetsmodule", "kosten"),
+}
 # Antwortcodes aus dem SoSci-Fragebogen, uebersetzt nach
 # results/InterviewResults/values_ahpsupplierselectionjs23_2026-09-24_16-57.csv.
 # Ein Code ohne Eintrag bricht den Lauf ab.
@@ -109,15 +123,21 @@ OTHER_PROGRAMME = {"bwl": "Business and economics"}
 # Skript nennt jeden so zugeordneten Freitext, damit die Zuordnung pruefbar
 # bleibt.
 OTHER_FALLBACK = "Industrial engineering and management"
-# Verweildauer der drei Fallseiten (SoSci-Variablen, randomisierte Reihenfolge).
-CASE_PAGES = ["TIME004", "TIME005", "TIME006"]
+# Verweildauer je Fall. SoSci misst die Zeit je Seite, nicht je Position: die
+# Randomisierung aendert nur die Reihenfolge der Seiten. Seite 4 zeigt Case1,
+# Seite 5 Case2, Seite 6 Case3. Welcher Fall an welcher Position stand, steht in
+# REIHENFOLGE (transform_interviews.py). Die Zuordnung prueft seiten_pruefen().
+PAGE_TIME = {"Case1": "TIME004", "Case2": "TIME005", "Case3": "TIME006"}
+CASE_PAGES = list(PAGE_TIME.values())
+ORDINAL = ["first", "second", "third", "fourth", "fifth"]
 
-# Abbildungen aus dem Notebook. Fehlende Dateien werden uebersprungen.
+# Abbildungen aus dem Notebook. Fehlende Dateien werden uebersprungen. "{case}"
+# im Namen heisst: eine Datei je Fall, Schluessel dann "weights-<fall>".
 # 02_konsistenz wird nicht mehr eingebunden: Tabelle tab:weights-cr traegt die
 # Aussage, und bei den Modellen liegen die Punkte eines Falls fast alle
 # aufeinander.
 FIGURES = {
-    "weights": ("01_gewichte", "Weights per run and per participant"),
+    "weights": ("01_gewichte_{case}", "Mean weights per case with minimum and maximum"),
     "rankings": ("03_rangfolgen", "Criterion rankings per case and source"),
 }
 
@@ -155,8 +175,20 @@ def num(wert: float, stellen: int = 3) -> str:
     return "--" if pd.isna(wert) else f"{wert:.{stellen}f}"
 
 
+def signed(wert: float, stellen: int = 3) -> str:
+    """Zahl mit Vorzeichen, fuer Differenzen."""
+    return "--" if pd.isna(wert) else f"${wert:+.{stellen}f}$"
+
+
 def pct(anteil: float, stellen: int = 0) -> str:
     return "--" if pd.isna(anteil) else f"{anteil * 100:.{stellen}f}\\%"
+
+
+def saaty(wert: float) -> str:
+    """Matrixeintrag als gewaehlter Skalenwert: '7' oder '1/7'."""
+    if pd.isna(wert):
+        return "--"
+    return str(round(wert)) if wert >= 1 else f"1/{round(1 / wert)}"
 
 
 def aufzaehlen(teile: list[str]) -> str:
@@ -208,13 +240,28 @@ MACRO_PREAMBLE = r"""% Zugriff auf die Werte: \resval{schluessel}. Fehlt ein Sch
 \makeatother"""
 
 
+def cmidrules(kopf: list[str]) -> str:
+    """\\cmidrule unter jeder Kopfzelle, die mit \\multicolumn mehrere Spalten fasst."""
+    regeln, spalte = [], 1
+    for zelle in kopf:
+        treffer = re.match(r"\\multicolumn\{(\d+)\}", zelle)
+        breite = int(treffer.group(1)) if treffer else 1
+        if breite > 1:
+            regeln.append(f"\\cmidrule(lr){{{spalte}-{spalte + breite - 1}}}")
+        spalte += breite
+    return " ".join(regeln)
+
+
 def table(caption: str, label: str, spalten: str, kopf: list[str],
-          gruppen: list[tuple[str | None, list[list[str]]]]) -> str:
+          gruppen: list[tuple[str | None, list[list[str]]]],
+          unterkopf: list[str] | None = None) -> str:
     """Booktabs-Tabelle.
 
     `gruppen` sind Bloecke aus Titel und Zeilen; der Titel wird als eigene
     Zeile ueber den Block gesetzt, statt in jeder Zeile zu stehen. Das spart
     eine Spalte, und die Tabellen bleiben bei langen Modellnamen im Satzspiegel.
+    `unterkopf` ist eine zweite Kopfzeile unter `kopf`, etwa Min./Max. unter
+    einer Ueberschrift, die mit \\multicolumn zwei Spalten fasst.
     """
     zeilen = [
         r"\begin{table}[htbp]",
@@ -224,13 +271,15 @@ def table(caption: str, label: str, spalten: str, kopf: list[str],
         f"  \\begin{{tabular}}{{{spalten}}}",
         r"    \toprule",
         "    " + " & ".join(kopf) + r" \\",
-        r"    \midrule",
     ]
+    if unterkopf:
+        zeilen += ["    " + cmidrules(kopf), "    " + " & ".join(unterkopf) + r" \\"]
+    zeilen.append(r"    \midrule")
     for i, (titel, block) in enumerate(gruppen):
         if i:
             zeilen.append(r"    \addlinespace")
         if titel:
-            zeilen.append(f"    \\multicolumn{{{len(kopf)}}}{{@{{}}l}}"
+            zeilen.append(f"    \\multicolumn{{{len(unterkopf or kopf)}}}{{@{{}}l}}"
                           f"{{\\textit{{{titel}}}}} \\\\")
         zeilen += ["    " + " & ".join(zelle) + r" \\" for zelle in block]
     zeilen += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
@@ -320,6 +369,13 @@ def load_runs(path: Path) -> tuple[pd.DataFrame, list[str], list[str]]:
     fehlend = {"quelle", "case", "run", "CR", *CRIT} - set(df.columns)
     if fehlend:
         raise SystemExit(f"{path}: Spalten fehlen: {', '.join(sorted(fehlend))}")
+    # Aeltere Exporte haben weder Temperatur noch Paarvergleiche; dann entfallen
+    # der Satz und die Tabelle dazu.
+    for teil, spalten in (("Temperatur", ["temperature"]), ("Paarvergleiche", PAIR_COLS)):
+        fehlend = [s for s in spalten if s not in df.columns]
+        if fehlend:
+            print(f"Ohne {teil}, Spalten fehlen in {path.name}: {', '.join(fehlend)}. "
+                  "auswertung.ipynb neu laufen lassen.")
 
     sources = list(dict.fromkeys(df["quelle"]))
     cases = [c for c in CASE_LABEL if c in set(df["case"])]
@@ -364,7 +420,10 @@ def auslese(roh: pd.DataFrame) -> tuple[list[tuple[str, int]], dict[str, pd.Data
     zeilen = abgeschlossen.to_dict("records")
     fehlend = [bool(fehlende_vergleiche(z)) for z in zeilen]
     zu_schnell = [not f and bool(zu_schnelle_seiten(z)) for z, f in zip(zeilen, fehlend)]
-    behalten = abgeschlossen[[not f and not z for f, z in zip(fehlend, zu_schnell)]]
+    ausreisser = [not f and not s and z["CASE"].strip() in AUSREISSER
+                  for z, f, s in zip(zeilen, fehlend, zu_schnell)]
+    behalten = abgeschlossen[[not f and not s and not a
+                              for f, s, a in zip(fehlend, zu_schnell, ausreisser)]]
     weg = [
         ("started", len(ab)),
         ("refused", int(verweigert.sum())),
@@ -372,9 +431,11 @@ def auslese(roh: pd.DataFrame) -> tuple[list[tuple[str, int]], dict[str, pd.Data
         ("completed", len(abgeschlossen)),
         ("missing", sum(fehlend)),
         ("fast", sum(zu_schnell)),
+        ("outlier", sum(ausreisser)),
         ("retained", len(behalten)),
     ]
-    return weg, {"completed": abgeschlossen, "retained": behalten}
+    return weg, {"completed": abgeschlossen, "retained": behalten,
+                 "outlier": abgeschlossen[ausreisser]}
 
 
 def gruppe(survey: pd.DataFrame, name: str, vals: Values) -> dict:
@@ -417,12 +478,66 @@ def gruppe(survey: pd.DataFrame, name: str, vals: Values) -> dict:
     for k, v in (("median", median), ("q1", q1), ("q3", q3)):
         vals.set(f"survey-time.{name}.{k}", num(v, 1))
 
-    return {"n": n, "erfahrung": erfahrung, "programme": programme}
+    return {"n": n, "erfahrung": erfahrung, "programme": programme,
+            "zeit": f"{num(median, 1)} ({num(q1, 1)}--{num(q3, 1)})",
+            "seiten": seitenwerte(survey, name, vals)}
 
 
-def sample(roh: pd.DataFrame, vals: Values, human_runs: set[int]) -> dict:
+def seitenwerte(survey: pd.DataFrame, name: str, vals: Values) -> dict:
+    """Je Fall: wie oft er an welcher Position stand und die Verweildauer auf
+    seiner Seite (Sekunden). Dazu die Verweildauer je Position."""
+    reihen = [survey[spalte].str.strip() for spalte in REIHENFOLGE]
+    unbekannt = set().union(*(set(r) for r in reihen)) - set(FAELLE)
+    if unbekannt:
+        raise SystemExit(f"{', '.join(REIHENFOLGE)}: unbekannte Fallkennung {sorted(unbekannt)}")
+
+    faelle = {}
+    for kennung, (fall, _) in FAELLE.items():
+        positionen = [int((r == kennung).sum()) for r in reihen]
+        sekunden = zahl(survey[PAGE_TIME[kennung]])
+        q1, median, q3 = sekunden.quantile([0.25, 0.5, 0.75])
+        faelle[fall] = {"positionen": positionen, "median": median, "q1": q1, "q3": q3}
+        for i, anzahl in enumerate(positionen, 1):
+            vals.set(f"survey-{name}-position.{slug(fall)}.{i}", str(anzahl))
+        for k, v in (("median", median), ("q1", q1), ("q3", q3)):
+            vals.set(f"survey-{name}-page-time.{slug(fall)}.{k}", num(v, 0))
+    alle = [a for e in faelle.values() for a in e["positionen"]]
+    vals.set(f"survey-{name}-position.min", str(min(alle)))
+    vals.set(f"survey-{name}-position.max", str(max(alle)))
+
+    # Verweildauer je Position: die Seite des Falls, der dort stand.
+    je_position = []
+    for i, spalte in enumerate(REIHENFOLGE, 1):
+        sekunden = pd.to_numeric(survey.apply(
+            lambda z: z[PAGE_TIME[z[spalte].strip()]].strip(), axis=1), errors="coerce")
+        je_position.append(float(sekunden.median()))
+        vals.set(f"survey-{name}-position-time.{i}.median", num(je_position[-1], 0))
+    return {"faelle": faelle, "je_position": je_position}
+
+
+def seiten_pruefen(abgeschlossen: pd.DataFrame) -> None:
+    """Prueft PAGE_TIME: bei jeder abgeschlossenen Teilnahme muss die Seite des
+    zuletzt gezeigten Falls die letzte bearbeitete Seite (LASTPAGE) sein."""
+    if "LASTPAGE" not in abgeschlossen.columns:
+        print("Ohne Pruefung von PAGE_TIME, Spalte LASTPAGE fehlt")
+        return
+    falsch = [
+        z["CASE"].strip() for z in abgeschlossen.to_dict("records")
+        if z["LASTPAGE"].strip() != str(int(PAGE_TIME[z[REIHENFOLGE[-1]].strip()][4:]))]
+    if falsch:
+        raise SystemExit(f"PAGE_TIME passt nicht zur Seitenreihenfolge bei {falsch}: "
+                         "Zuordnung Fall -> TIME-Spalte pruefen.")
+
+
+def sample(roh: pd.DataFrame, vals: Values, probanden: pd.DataFrame) -> dict:
     """Weg der Auslese und beide Gruppen: alle Abgeschlossenen, die Ausgewerteten."""
     weg, gruppen = auslese(roh)
+    human_runs = set(probanden["run"].astype(int))
+    ausreisser = list(gruppen.pop("outlier")["CASE"].str.strip())
+    ohne_grund = set(ausreisser) - set(OUTLIER_FIRST)
+    if ohne_grund:
+        raise SystemExit(f"Ausreisser ohne Eintrag in OUTLIER_FIRST: {sorted(ohne_grund)}")
+    seiten_pruefen(gruppen["completed"])
     for schritt, anzahl in weg:
         vals.set(f"survey-n-{schritt}", str(anzahl))
     vals.set("survey-min-seconds", str(MIN_SEKUNDEN))
@@ -435,7 +550,92 @@ def sample(roh: pd.DataFrame, vals: Values, human_runs: set[int]) -> dict:
                          f"{sorted(behalten - human_runs)}, nur in runs.csv "
                          f"{sorted(human_runs - behalten)}. clean_interviews.py, "
                          "transform_interviews.py und auswertung.ipynb neu laufen lassen.")
-    return {"weg": dict(weg), **{name: gruppe(g, name, vals) for name, g in gruppen.items()}}
+
+    # Regel aus dem Text: Ausreisser setzen das bei den Behaltenen im Mittel
+    # niedrigste Kriterium vorn, und keine behaltene Teilnahme tut das.
+    if human_runs:
+        for teilnahme in ausreisser:
+            fall, krit = OUTLIER_FIRST[teilnahme]
+            niedrigstes = probanden.loc[probanden["case"] == fall, CRIT].mean().idxmin()
+            if krit != niedrigstes:
+                raise SystemExit(f"Ausreisser {teilnahme}: bei {fall} ist im Mittel {niedrigstes}"
+                                 f" am niedrigsten, nicht {krit}; OUTLIER_FIRST pruefen.")
+        for fall in probanden["case"].unique():
+            g = probanden[probanden["case"] == fall]
+            niedrigstes = g[CRIT].mean().idxmin()
+            vorn = g.loc[g[niedrigstes] >= g[CRIT].max(axis=1) - 1e-9, "run"]
+            if len(vorn):
+                raise SystemExit(f"{fall}: {sorted(vorn.astype(int))} setzen {niedrigstes} vorn,"
+                                 " das im Mittel niedrigste Kriterium; in AUSREISSER aufnehmen.")
+    ausreisser.sort(key=lambda t: list(CASE_LABEL).index(OUTLIER_FIRST[t][0]))
+    return {"weg": dict(weg), "ausreisser": ausreisser,
+            **{name: gruppe(g, name, vals) for name, g in gruppen.items()}}
+
+
+def outlier_satz(ausreisser: list[str]) -> str:
+    """Ausschluss der Ausreisser mit Fall und vorn gesetztem Kriterium; leer ohne."""
+    if not ausreisser:
+        return ""
+    gruende = aufzaehlen([
+        f"{tex(CRIT_LABEL[krit].lower())} for {tex(CASE_LABEL[fall].lower())}"
+        for fall, krit in (OUTLIER_FIRST[t] for t in ausreisser)])
+    if len(ausreisser) == 1:
+        return ("One further participant was excluded as an outlier because, in one case, "
+                "they ranked first the criterion that the retained participants weighted "
+                f"lowest on average there: {gruende}.")
+    return (r"A further \resval{survey-n-outlier} participants were excluded as outliers"
+            " because each ranked first, in one case, the criterion that the retained"
+            f" participants weighted lowest on average there: {gruende}.")
+
+
+def sample_section(stichprobe: dict) -> str:
+    """Eine Tabelle: Erfahrung, Studiengang und Bearbeitungszeit, fuer beide Gruppen."""
+    fertig, behalten = stichprobe["completed"], stichprobe["retained"]
+
+    def zeilen(schluessel: str) -> list[list[str]]:
+        # Zeilen ohne Eintrag fallen weg. Die Ausgewerteten sind eine Teilmenge
+        # der Abgeschlossenen, eine Null dort ist also auch hier eine Null.
+        return [[tex(label), str(a), pct(a / fertig["n"]), str(b), pct(b / behalten["n"])]
+                for (label, a), (_, b) in zip(fertig[schluessel], behalten[schluessel]) if a]
+
+    def zwei(text: str, ausrichtung: str = "r") -> str:
+        return f"\\multicolumn{{2}}{{{ausrichtung}}}{{{text}}}"
+
+    return table(
+        caption="Participant sample for all completed questionnaires and for the "
+                "participants retained for analysis: prior work experience in "
+                "procurement, study programme, and time spent on the three case pages "
+                "together (median with interquartile range, in minutes).",
+        label="tab:survey-sample",
+        spalten="lrrrr",
+        kopf=["", zwei(f"Completed ($n = {fertig['n']}$)", "c"),
+              zwei(f"Retained ($n = {behalten['n']}$)", "c")],
+        gruppen=[(None, [["", "$n$", "Share", "$n$", "Share"]]),
+                 ("Work experience in procurement", zeilen("erfahrung")),
+                 ("Study programme", zeilen("programme")),
+                 ("Time on the case pages", [["Median (IQR), min",
+                                              zwei(fertig["zeit"]), zwei(behalten["zeit"])]])],
+    )
+
+
+def pages_section(stichprobe: dict) -> str:
+    """Eine Tabelle zu den Fallseiten der ausgewerteten Teilnahmen: Position in
+    der randomisierten Reihenfolge und Verweildauer je Fall."""
+    behalten = stichprobe["retained"]
+    zeilen = [
+        [tex(CASE_LABEL[fall]), *(str(a) for a in e["positionen"]),
+         f"{num(e['median'], 0)} ({num(e['q1'], 0)}--{num(e['q3'], 0)})"]
+        for fall, e in behalten["seiten"]["faelle"].items()]
+    return table(
+        caption=f"Case pages of the retained participants ($n = {behalten['n']}$): how often "
+                "each case was shown at each position of the randomised order, and the time "
+                "spent on the page of the case (median with interquartile range, in seconds).",
+        label="tab:survey-pages",
+        spalten="l" + "r" * (len(REIHENFOLGE) + 1),
+        kopf=["Case", *(f"Position {i}" for i in range(1, len(REIHENFOLGE) + 1)),
+              "Time (s), median (IQR)"],
+        gruppen=[(None, zeilen)],
+    )
 
 
 def key_of(quelle: str) -> str:
@@ -477,8 +677,21 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
     vals.set("cr-threshold", num(CR_THRESHOLD, 2))
     vals.set("weight-method", WEIGHT_METHOD)
     vals.set("random-index", RANDOM_INDEX)
-    vals.set("temperature", TEMPERATURE)
 
+    # Temperatur je Modell aus den Rohdaten; die Probanden haben keine. Ist sie
+    # bei allen Modellen gleich, nennt der Text nur eine Zahl.
+    temperaturen: dict[str, float] = {}
+    if "temperature" in df.columns:
+        for q in llm_sources:
+            werte = df.loc[df["quelle"] == q, "temperature"].dropna().unique()
+            if len(werte) != 1:
+                raise SystemExit(f"{q}: keine oder mehrere Temperaturen in runs.csv: {werte}")
+            temperaturen[q] = float(werte[0])
+            vals.set(f"temperature.{key_of(q)}", num(temperaturen[q], 1))
+        if len(set(temperaturen.values())) == 1:
+            vals.set("temperature", num(next(iter(temperaturen.values())), 1))
+
+    hat_paare = set(PAIR_COLS) <= set(df.columns)
     kennzahlen: dict[tuple[str, str], dict] = {}
     for quelle in sources:
         for case in cases:
@@ -499,6 +712,8 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
                 "patterns": g[CRIT].round(6).apply(tuple, axis=1).nunique(),
                 "dist_median": float(np.median(d)) if d.size else np.nan,
                 "weights": w,
+                # Je Paarvergleich kleinster und groesster gewaehlter Wert.
+                "paare": g[PAIR_COLS].agg(["min", "max"]).T.to_numpy() if hat_paare else None,
             }
             eintrag["sd_mean"] = float(np.mean(eintrag["sd"]))
             kennzahlen[(quelle, case)] = eintrag
@@ -561,80 +776,21 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
             vals.set(f"{name}.models.min", fmt(min(werte)))
             vals.set(f"{name}.models.max", fmt(max(werte)))
 
-    # Abstand zur Ground-Truth, mit demselben Mass wie alle anderen Vergleiche.
-    wahrheit: dict[tuple[str, str], dict] = {}
+    # Zielgewichte: nur als Zeile in tab:weights-spread, zur Orientierung. Sie
+    # werden bewusst nicht mit den erhobenen Gewichten verglichen.
     gt_cases = (gt or {}).get("cases", {})
-    einig_anders: list[str] = []
     for case, eintrag in gt_cases.items():
-        ziel = eintrag["weights"]
         for i, c in enumerate(CRIT):
-            vals.set(f"gt.{slug(case)}.{slug(c)}", num(ziel[i], 4))
+            vals.set(f"gt.{slug(case)}.{slug(c)}", num(eintrag["weights"][i], 4))
         if eintrag["strategy"]:
             vals.set(f"gt-strategy.{slug(case)}", tex(eintrag["strategy"]))
-
-        # Wie viele Quellen setzen das Kriterium mit dem hoechsten Zielgewicht
-        # im Mittel auch auf Rang eins?
-        oben = int(np.argmax(ziel))
-        oben_je_quelle = [int(np.argmax(kennzahlen[(q, case)]["mean"]))
-                          for q in sources if (q, case) in kennzahlen]
-        vals.set(f"gt-top.{slug(case)}", CRIT_LABEL[CRIT[oben]].lower())
-        vals.set(f"gt-top-hits.{slug(case)}", str(sum(o == oben for o in oben_je_quelle)))
-        # Setzen alle Quellen dasselbe andere Kriterium auf Rang eins, nennt
-        # der Text es.
-        if len(set(oben_je_quelle)) == 1 and oben_je_quelle[0] != oben:
-            vals.set(f"gt-top-instead.{slug(case)}",
-                     CRIT_LABEL[CRIT[oben_je_quelle[0]]].lower())
-            einig_anders.append(case)
-
-        for quelle in sources:
-            e = kennzahlen.get((quelle, case))
-            if e is None:
-                continue
-            d = np.linalg.norm(e["weights"] - ziel, axis=1)
-            treffer = {
-                "d_means": float(np.linalg.norm(e["mean"] - ziel)),
-                "median": float(np.median(d)),
-                "q25": float(np.quantile(d, 0.25)),
-                "q75": float(np.quantile(d, 0.75)),
-            }
-            wahrheit[(quelle, case)] = treffer
-            pq = f"{key_of(quelle)}.{slug(case)}"
-            vals.set(f"gt-dmeans.{pq}", num(treffer["d_means"]))
-            vals.set(f"gt-median.{pq}", num(treffer["median"]))
-            vals.set(f"gt-q25.{pq}", num(treffer["q25"]))
-            vals.set(f"gt-q75.{pq}", num(treffer["q75"]))
-
-    naeher = None
-    if wahrheit:
-        for wer, ist_mensch in (("models", False), ("human", True)):
-            eintraege = [e for (q, _), e in wahrheit.items() if (q == HUMAN_SOURCE) == ist_mensch]
-            if not eintraege:
-                continue
-            for feld, name in (("d_means", "gt-dmeans"), ("median", "gt-median")):
-                vals.set(f"{name}.{wer}.min", num(min(e[feld] for e in eintraege)))
-                vals.set(f"{name}.{wer}.max", num(max(e[feld] for e in eintraege)))
-
-        # In wie vielen Faellen liegt der Probandenmittelwert naeher an den
-        # Zielgewichten als der Mittelwert jedes Modells?
-        n_naeher = n_verglichen = 0
-        for case in gt_cases:
-            mensch = wahrheit.get((HUMAN_SOURCE, case))
-            modelle = [wahrheit[(q, case)]["d_means"] for q in llm_sources
-                       if (q, case) in wahrheit]
-            if mensch is None or not modelle:
-                continue
-            n_verglichen += 1
-            n_naeher += mensch["d_means"] < min(modelle)
-        if n_verglichen:
-            vals.set("gt-human-closer", str(n_naeher))
-            vals.set("gt-n-compared", str(n_verglichen))
-            naeher = (n_naeher, n_verglichen)
 
     anker: dict[tuple[str, str], dict] = {}
     referenz: dict[str, dict] = {}
     lh_unter: dict[str, int] = {}
     lh_ueber: dict[str, int] = {}
     lh_vorne = 0
+    lh_naeher = 0
     if hat_probanden:
         for case in cases:
             human = kennzahlen.get((HUMAN_SOURCE, case))
@@ -695,6 +851,12 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
             if hc:
                 vals.set("hc-median.cases.min", num(min(hc)))
                 vals.set("hc-median.cases.max", num(max(hc)))
+                # Wie oft liegt ein Modell naeher am Probandenmittel als ein
+                # typischer Proband am Mittel der uebrigen?
+                lh_naeher = int(sum(
+                    e["d_means"] < referenz[case]["hc_median"]
+                    for (_, case), e in anker.items() if "hc_median" in referenz[case]))
+                vals.set("lh-closer", str(lh_naeher))
 
             # Richtung der Unterschiede je Kriterium, ueber alle Kombinationen
             # aus Modell und Fall gezaehlt.
@@ -715,16 +877,16 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
         "referenz": referenz,
         "llm_sources": llm_sources,
         "hat_probanden": hat_probanden,
+        "hat_paare": hat_paare,
+        "temperaturen": temperaturen,
         "labels": labels,
         "bedingung": bedingung,
-        "wahrheit": wahrheit,
         "gt": gt_cases,
-        "gt_einig_anders": einig_anders,
-        "gt_naeher": naeher,
         "hc_da": any("hc_median" in r for r in referenz.values()),
         "lh_unter": lh_unter,
         "lh_ueber": lh_ueber,
         "lh_vorne": lh_vorne,
+        "lh_naeher": lh_naeher,
         "n_gleich": len(set(n_je_modell_fall)) <= 1,
     }
 
@@ -732,6 +894,40 @@ def collect(df: pd.DataFrame, sources: list[str], cases: list[str],
 # --------------------------------------------------------------------------
 # Tabellen
 # --------------------------------------------------------------------------
+
+def judgement_section(sources: list[str], cases: list[str], daten: dict) -> str:
+    """Kleinster und groesster gewaehlter Wert je Paarvergleich, Fall und Quelle.
+
+    Gezeigt wird der Skalenwert, nicht das Gewicht: der Matrixeintrag a_ij, also
+    2 bis 9, wenn das erste Kriterium des Paars vorgezogen wurde, 1/2 bis 1/9,
+    wenn das zweite, und 1 bei Gleichgewicht.
+    """
+    kennzahlen, labels = daten["kennzahlen"], daten["labels"]
+    gruppen = []
+    for case in cases:
+        block = []
+        for q in sources:
+            e = kennzahlen.get((q, case))
+            if e is None:
+                continue
+            block.append([tex(labels[q]), *(saaty(w) for paar in e["paare"] for w in paar)])
+        if block:
+            gruppen.append((tex(CASE_LABEL[case]), block))
+    paare = [f"\\multicolumn{{2}}{{c}}{{\\begin{{tabular}}{{@{{}}c@{{}}}}"
+             f"{tex(CRIT_LABEL[a])}\\\\vs.\\ {tex(CRIT_LABEL[b])}\\end{{tabular}}}}"
+             for a, b in PAIRS]
+    return table(
+        caption="Smallest and largest value selected in each pairwise comparison, per case "
+                "and source. A value $x > 1$ means that the first criterion of the pair was "
+                "preferred with intensity $x$, $1/x$ that the second criterion was preferred "
+                "with intensity $x$, and $1$ that both were rated as equally important.",
+        label="tab:weights-judgements",
+        spalten="l" + "r" * (2 * len(PAIRS)),
+        kopf=["", *paare],
+        unterkopf=["Source", *(["Min.", "Max."] * len(PAIRS))],
+        gruppen=gruppen,
+    )
+
 
 def variance_section(sources: list[str], cases: list[str], daten: dict) -> str:
     kennzahlen, labels, gt = daten["kennzahlen"], daten["labels"], daten["gt"]
@@ -799,63 +995,42 @@ def consistency_section(sources: list[str], cases: list[str], daten: dict) -> st
     )
 
 
-def agreement_section(sources: list[str], cases: list[str], daten: dict) -> str:
-    """Eine Tabelle fuer RQ4: Abstand zu den Zielgewichten und zu den Probanden.
+def comparison_section(cases: list[str], daten: dict) -> str:
+    """Eine Tabelle fuer RQ4: Modellgewichte gegen Probandengewichte.
 
-    Ersetzt die frueheren Tabellen tab:weights-gt-distance, tab:weights-anchor
-    und tab:weights-diff. Die Probandenzeile steht wie in den anderen Tabellen
-    oben; ihre letzte Spalte ist die Referenz: Probanden untereinander.
+    Je Modell und Fall: Abstand des Modellmittels zum Probandenmittel und die
+    Differenz je Kriterium (Modell minus Probanden). Die Probandenzeile ist die
+    Referenz fuer den Abstand: Median-Abstand eines Probanden zum Mittel der
+    uebrigen Probanden. Ersetzt tab:weights-anchor und tab:weights-diff.
     """
-    wahrheit, anker, referenz = daten["wahrheit"], daten["anker"], daten["referenz"]
-    labels = daten["labels"]
-    mit_ziel, mit_anker = bool(wahrheit), bool(anker)
-    if not (mit_ziel or mit_anker):
+    anker, referenz, labels = daten["anker"], daten["referenz"], daten["labels"]
+    if not anker:
         return ""
-
-    def spanne(e: dict) -> str:
-        return f"{num(e['median'])} [{num(e['q25'])}, {num(e['q75'])}]"
-
     gruppen = []
     for case in cases:
-        block = []
-        for q in sources:
-            if (q, case) not in daten["kennzahlen"]:
+        if case not in referenz:
+            continue
+        block = [[f"{tex(HUMAN_LABEL)} (reference)",
+                  num(referenz[case].get("hc_median", np.nan)),
+                  *(["--"] * len(CRIT))]]
+        for q in daten["llm_sources"]:
+            e = anker.get((q, case))
+            if e is None:
                 continue
-            zeile = [tex(labels[q])]
-            if mit_ziel:
-                e = wahrheit.get((q, case))
-                zeile.append(num(e["d_means"]) if e else "--")
-            if mit_anker:
-                if q == HUMAN_SOURCE:
-                    r = referenz.get(case)
-                    zeile += ["--", spanne(r) if r else "--"]
-                else:
-                    e = anker.get((q, case))
-                    zeile += [num(e["d_means"]), spanne(e)] if e else ["--", "--"]
-            block.append(zeile)
-        if block:
-            gruppen.append((tex(CASE_LABEL[case]), block))
-
-    kopf, ziele, erklaerung = ["Source"], [], []
-    if mit_ziel:
-        kopf.append("To target")
-        ziele.append(f"the {tex(TARGET_TERM)}")
-        erklaerung.append("\\emph{To target} is the distance between the mean weight vector "
-                          f"of the source and the {tex(TARGET_TERM)}.")
-    if mit_anker:
-        kopf += ["To participant mean", "To single participants, median [IQR]"]
-        ziele.append("the participants")
-        erklaerung.append("\\emph{To participant mean} is the distance between the mean "
-                          "weight vector of the model and the mean weight vector of the "
-                          "participants. \\emph{To single participants} is the median "
-                          "distance between single weight vectors, with the interquartile "
-                          "range in brackets: model runs against participants and, in the "
-                          "participant row, participants against each other.")
+            block.append([tex(labels[q]), num(e["d_means"]),
+                          *(signed(e["diff"][i]) for i in range(len(CRIT)))])
+        gruppen.append((tex(CASE_LABEL[case]), block))
     return table(
-        caption="Distance of the weights to " + aufzaehlen(ziele) + ". " + " ".join(erklaerung),
-        label="tab:weights-agreement",
-        spalten="l" + "r" * (len(kopf) - 1),
-        kopf=kopf,
+        caption="Comparison of the model weights with the weights of the participants. "
+                "\\emph{Distance} is the distance between the mean weight vector of the model "
+                "and the mean weight vector of the participants; in the reference row, it is "
+                "the median distance between a single participant and the mean weight vector "
+                "of the other participants. The criterion columns give the mean weight of the "
+                "model minus the mean weight of the participants; a negative value means that "
+                "the model gives the criterion a lower weight.",
+        label="tab:weights-comparison",
+        spalten="l" + "r" * (len(CRIT) + 1),
+        kopf=["Source", "Distance", *(tex(CRIT_LABEL[c]) for c in CRIT)],
         gruppen=gruppen,
     )
 
@@ -878,6 +1053,7 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
     k, labels, llm = daten["kennzahlen"], daten["labels"], daten["llm_sources"]
     begriff = tex(TARGET_TERM)
     mit_probanden = any((HUMAN_SOURCE, c) in k for c in cases)
+    gewichte = [c for c in cases if f"weights-{c}" in vorhandene]   # Faelle mit Abbildung
 
     def fall(case: str) -> str:
         return tex(CASE_LABEL[case].lower())
@@ -891,15 +1067,13 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
     teile: list[str] = []
 
     # 0. Einleitung
-    vergleiche = ([f"the {begriff}"] if daten["wahrheit"] else []) + (
-        ["the weights of the participants"] if daten["anker"] else [])
     teile.append("\\section{" + tex(title) + "}\n\\label{sec:results-weights}\n\n" + absatz([
-        "This section addresses RQ3 and the weighting part of RQ4. It first describes the "
-        "two sources of judgements, the participants and the models. It then answers RQ3: "
-        "how stable the weights are across runs and how consistent the pairwise matrices are.",
-        ("Finally, it answers the weighting part of RQ4 by comparing the weights with "
-         + aufzaehlen(vergleiche) + ".") if vergleiche else "",
-        "The section is descriptive and confines itself to the measured values.",
+        "This section addresses RQ3 and the weighting part of RQ4. After the data basis, it "
+        "reports how stable the weights are and how consistent the pairwise matrices are "
+        "(RQ3).",
+        "It then compares the model weights with the weights of the participants (RQ4)."
+        if daten["anker"] else "",
+        "The section only describes the measured values.",
     ]))
 
     # 1. Befragung
@@ -909,12 +1083,11 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
                       " on at least one case page")
         if stichprobe["weg"]["missing"]:
             ausschluss = r"\resval{survey-n-missing} lacked a pairwise comparison and " + ausschluss
-        studium = [
-            f"\\resval{{survey-retained-programme.{slug(label)}}} "
-            f"(\\resval{{survey-retained-programme.{slug(label)}.share}})"
-            + (" study " if i == 0 else " ") + tex(label[:1].lower() + label[1:])
-            for i, (label, _) in enumerate(
-                p for p in stichprobe["retained"]["programme"] if p[1])]
+        n_pos = len(REIHENFOLGE)
+        zeiten = aufzaehlen([
+            f"\\resval{{survey-retained-position-time.{i}.median}}\\,s at the {ORDINAL[i - 1]}"
+            + (" position" if i == 1 else "")
+            for i in range(1, n_pos + 1)])
         teile.append("\\subsection{Participant sample}\n"
                      "\\label{sec:results-weights-sample}\n\n" + absatz([
             r"The participants rated the \resval{n-cases} cases in the online survey described"
@@ -922,17 +1095,26 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
             r"Of \resval{survey-n-started} recorded questionnaires, \resval{survey-n-refused}"
             r" refused consent and \resval{survey-n-aborted} were aborted before the last"
             r" page, which leaves \resval{survey-n-completed} completed questionnaires.",
-            "Of these, " + ausschluss + r" and were excluded, so \resval{survey-n-retained}"
-            " participants enter the analysis.",
-            ("Among the retained participants, " + aufzaehlen(studium) + ".") if studium else "",
-            r"Prior work experience in procurement was reported by"
-            r" \resval{survey-retained-experience.yes}"
-            r" (\resval{survey-retained-experience.yes.share}).",
-            r"The retained participants spent a median of"
-            r" \resval{survey-time.retained.median}\,min on the three case pages together"
-            r" (interquartile range"
+            "Of these, " + ausschluss + " and were excluded.",
+            outlier_satz(stichprobe["ausreisser"]),
+            r"This leaves \resval{survey-n-retained} participants for the analysis.",
+            r"Table~\ref{tab:survey-sample} describes both groups.",
+            r"Among the retained participants, \resval{survey-retained-experience.yes}"
+            r" (\resval{survey-retained-experience.yes.share}) reported prior work experience"
+            r" in procurement.",
+            r"They spent a median of \resval{survey-time.retained.median}\,min on the three"
+            r" case pages together (interquartile range"
             r" \resval{survey-time.retained.q1}--\resval{survey-time.retained.q3}\,min).",
+        ]) + "\n\n" + absatz([
+            r"The order of the case pages was randomised. Table~\ref{tab:survey-pages} shows"
+            r" how often each case was shown at each position and how long the retained"
+            r" participants stayed on the page of each case.",
+            r"Each case appeared between \resval{survey-retained-position.min} and"
+            r" \resval{survey-retained-position.max} times at each position.",
+            "By position, the median time on a case page was " + zeiten + ".",
         ]))
+        teile.append(sample_section(stichprobe))
+        teile.append(pages_section(stichprobe))
 
     # 2. Modelllaeufe
     if llm:
@@ -943,13 +1125,18 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
             erklaerung = CONDITION_TEXT.get(daten["bedingung"])
             bedingung = (r"They ran in the \texttt{\resval{condition}} condition"
                          + (": " + erklaerung if erklaerung else "") + ".")
+        temperaturen = daten["temperaturen"]
+        temperatur = ""
+        if len(set(temperaturen.values())) == 1:
+            temperatur = r"All calls used a temperature of \resval{temperature}."
+        elif temperaturen:
+            temperatur = "The calls used a temperature of " + aufzaehlen([
+                f"\\resval{{temperature.{key_of(q)}}} for {name(q)}" for q in temperaturen]) + "."
         teile.append("\\subsection{Model runs}\n"
                      "\\label{sec:results-weights-models}\n\n" + absatz([
             r"The \resval{n-models} models (\resval{models}) rated the same \resval{n-cases}"
             f" cases, following the procedure in Section~\\ref{{{LLM_SECTION}}}.",
-            r"All calls used a temperature of \resval{temperature}.",
-            bedingung,
-            "The analysis uses " + n_valid + " valid runs per model and case.",
+            temperatur,
         ]))
 
     # 3. RQ3: Stabilitaet der Gewichte
@@ -959,6 +1146,8 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         r" comparisons per case. They form a reciprocal"
         r" $\resval{n-criteria} \times \resval{n-criteria}$ matrix, from which the weights"
         r" are derived with the \resval{weight-method}.",
+        r"Table~\ref{tab:weights-judgements} gives, per case and source, the smallest and"
+        r" the largest value selected in each comparison." if daten["hat_paare"] else "",
         r"Two weight vectors are compared by their Euclidean distance. It ranges from $0$"
         r" for identical weights to $\sqrt{2} \approx 1.414$ for the two most dissimilar"
         r" vectors on the simplex.",
@@ -967,10 +1156,13 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         r" each criterion with its standard deviation across runs or participants, the"
         r" number of distinct weight vectors, and the median pairwise distance within the"
         r" source.",
-        r"Figure~\ref{fig:weights-spread} shows the underlying single values."
-        if "weights" in vorhandene else "",
-        r"In the text, the standard deviation is averaged over the \resval{n-criteria}"
-        r" criteria.",
+        f"The first row of each case gives the {begriff} from which the case was generated."
+        " They are shown for orientation only and are not compared further."
+        if daten["gt"] else "",
+        ("Figure~" if len(gewichte) == 1 else "Figures~")
+        + aufzaehlen([f"\\ref{{fig:weights-{slug(c)}}}" for c in gewichte])
+        + (" shows" if len(gewichte) == 1 else " show") + " the mean weights of each source"
+        " together with the smallest and the largest weight." if gewichte else "",
     ]))
 
     saetze = []
@@ -985,8 +1177,8 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         else:
             saetze.append(
                 f"For {name(q)}, the runs of a case give {von_bis(f'patterns.{s}', muster)}"
-                f" distinct weight vectors, with a standard deviation of at most"
-                f" \\resval{{sd-mean.{s}.max}}.")
+                f" distinct weight vectors, with a standard deviation (averaged over the"
+                f" criteria) of at most \\resval{{sd-mean.{s}.max}}.")
     # Groesste Streuung unter den Modellen: welcher Fall, welche Kriterien.
     streuend = [(q, c) for q in llm for c in cases if (q, c) in k and k[(q, c)]["patterns"] > 1]
     if streuend:
@@ -994,11 +1186,9 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         e, p = k[(q, c)], f"{key_of(q)}.{slug(c)}"
         i1, i2 = (int(i) for i in np.argsort(-e["sd"])[:2])
         saetze.append(
-            f"The largest spread among the models occurs for {name(q)} on the {fall(c)}"
-            f" (\\resval{{sd-mean.{p}}}). There, the standard deviation is largest for"
-            f" {krit(i1)} (\\resval{{w-sd.{p}.{slug(CRIT[i1])}}}) and {krit(i2)}"
-            f" (\\resval{{w-sd.{p}.{slug(CRIT[i2])}}}), and the median distance between two"
-            f" runs is \\resval{{dist-median.{p}}}.")
+            f"The largest spread among the models occurs for {name(q)} on the {fall(c)},"
+            f" mainly in {krit(i1)} (\\resval{{w-sd.{p}.{slug(CRIT[i1])}}}) and {krit(i2)}"
+            f" (\\resval{{w-sd.{p}.{slug(CRIT[i2])}}}).")
     if saetze:
         teile.append(absatz(saetze))
 
@@ -1008,19 +1198,25 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         teile.append(absatz([
             f"The \\resval{{runs.{h}}} participants give {von_bis(f'patterns.{h}', muster)}"
             " distinct weight vectors per case.",
-            f"Their standard deviation ranges from \\resval{{sd-mean.{h}.min}} to"
+            f"Their averaged standard deviation ranges from \\resval{{sd-mean.{h}.min}} to"
             f" \\resval{{sd-mean.{h}.max}}, and the median distance between two participants"
             f" from \\resval{{dist-median.{h}.min}} to \\resval{{dist-median.{h}.max}}"
             + (r", against at most \resval{dist-median.models.max} between two runs of the"
                " same model." if llm else "."),
         ]))
 
+    if daten["hat_paare"]:
+        teile.append(judgement_section(sources, cases, daten))
     teile.append(variance_section(sources, cases, daten))
-    if "weights" in vorhandene:
-        teile.append(figure(vorhandene["weights"],
-                            "Weights per run and per participant. Each point is one run or "
-                            "one participant, the horizontal line is the mean of the source.",
-                            "fig:weights-spread", figure_dir, "1.0"))
+    for c in gewichte:
+        # Den umrandeten Balken zeichnet das Notebook aus derselben ground_truth.yaml.
+        ziel = (f" The outlined first bar of each criterion gives the {begriff}."
+                if c in daten["gt"] else "")
+        teile.append(figure(vorhandene[f"weights-{c}"],
+                            f"Weights in the {fall(c)} case. The bar is the mean weight of the "
+                            "source; the error bar spans the smallest to the largest weight "
+                            "across the runs or participants." + ziel,
+                            f"fig:weights-{slug(c)}", figure_dir, "0.9"))
 
     # 4. RQ3: Konsistenz der Matrizen
     saetze = [
@@ -1070,94 +1266,44 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
                  "\\label{sec:results-weights-cr}\n\n" + absatz(saetze))
     teile.append(consistency_section(sources, cases, daten))
 
-    # 5. RQ4: Zielgewichte und Probanden
-    if daten["wahrheit"] or daten["anker"]:
-        ziele = ([f"the {begriff}"] if daten["wahrheit"] else []) + (
-            ["the participants"] if daten["anker"] else [])
-        absaetze = []
+    # 5. RQ4: Modellgewichte gegen Probandengewichte
+    if daten["anker"]:
+        n_komb = len(daten["anker"])
 
-        if daten["wahrheit"]:
-            rang_eins = aufzaehlen([
-                f"\\resval{{gt-top-hits.{slug(c)}}} of \\resval{{n-sources}} sources for the"
-                f" {fall(c)} (\\resval{{gt-top.{slug(c)}}})"
-                for c in cases if c in daten["gt"]])
-            saetze = [
-                f"Each case was generated from a fixed weight vector, its {begriff}, that is,"
-                " the weights its statements were meant to express.",
-                f"Table~\\ref{{tab:weights-spread}} shows the {begriff} in the first row of"
-                " each case, and Table~\\ref{tab:weights-agreement} reports the distances to"
-                " them.",
-                f"The criterion that ranks first in the {begriff} is also ranked first by the"
-                f" mean weights of {rang_eins}.",
-            ]
-            for c in daten["gt_einig_anders"]:
-                saetze.append(f"For the {fall(c)}, all \\resval{{n-sources}} sources rank"
-                              f" \\resval{{gt-top-instead.{slug(c)}}} first instead.")
-            if daten["gt_naeher"]:
-                n_naeher, n_verglichen = daten["gt_naeher"]
-                menge = (r"In all \resval{gt-n-compared} cases" if n_naeher == n_verglichen
-                         else r"In \resval{gt-human-closer} of the \resval{gt-n-compared} cases")
-                saetze.append(menge + ", the mean weight vector of the participants is closer"
-                              f" to the {begriff} than the mean weight vector of every model.")
-                saetze.append(
-                    f"For single weight vectors, the median distance to the {begriff} ranges"
-                    r" from \resval{gt-median.human.min} to \resval{gt-median.human.max} for"
-                    r" the participants and from \resval{gt-median.models.min} to"
-                    r" \resval{gt-median.models.max} for the model runs.")
-            absaetze.append(absatz(saetze))
+        def wie_viele(anzahl: int, schluessel: str) -> str:
+            return (r"all \resval{lh-n-combinations}" if anzahl == n_komb
+                    else f"\\resval{{{schluessel}}} of the \\resval{{lh-n-combinations}}")
 
-        if daten["anker"]:
-            saetze = [
-                r"The comparison with the participants is exploratory: it places the model"
-                r" weights next to the weights of \resval{runs.human} participants.",
-                r"The distance between the mean weight vector of a model and the mean weight"
-                r" vector of the participants ranges from \resval{lh-dmeans.models.min} to"
-                r" \resval{lh-dmeans.models.max}.",
-            ]
-            if daten["hc_da"]:
-                saetze.append(
-                    r"For reference, the median distance between a single participant and the"
-                    r" mean weight vector of the other participants ranges from"
-                    r" \resval{hc-median.cases.min} to \resval{hc-median.cases.max}.")
+        saetze = [
+            r"Table~\ref{tab:weights-comparison} compares the model weights with the weights"
+            r" of the \resval{runs.human} participants. The distance between the mean weight"
+            r" vector of a model and the mean weight vector of the participants ranges from"
+            r" \resval{lh-dmeans.models.min} to \resval{lh-dmeans.models.max}.",
+        ]
+        if daten["hc_da"]:
             saetze.append(
-                r"At the level of single vectors, the median distance between a model run and"
-                r" a participant ranges from \resval{lh-median.models.min} to"
-                r" \resval{lh-median.models.max}, and between two participants from"
-                r" \resval{hh-median.cases.min} to \resval{hh-median.cases.max}.")
-            saetze.append(
-                "A vector near the centre of the participants tends to be closer to a single"
-                " participant than two participants are to each other, so this comparison"
-                " favours central vectors.")
-            absaetze.append(absatz(saetze))
+                r"As a reference, a single participant lies at a median distance of"
+                r" \resval{hc-median.cases.min} to \resval{hc-median.cases.max} from the mean"
+                r" weight vector of the other participants. In"
+                f" {wie_viele(daten['lh_naeher'], 'lh-closer')} combinations of model and"
+                " case, the model lies closer to the participant mean than this reference.")
+        saetze.append(
+            "Per criterion, the models give a higher weight than the participants to the"
+            " criterion that the participants rank first in"
+            f" {wie_viele(daten['lh_vorne'], 'lh-lead-above')} combinations.")
+        for c in CRIT:
+            for zaehler, richtung in ((daten["lh_unter"], "lower"), (daten["lh_ueber"], "higher")):
+                if zaehler.get(c) == n_komb:
+                    saetze.append(f"{tex(CRIT_LABEL[c])} receives a {richtung} weight from the"
+                                  " models than from the participants in every combination.")
+        if "rankings" in vorhandene:
+            saetze.append(r"Figure~\ref{fig:weights-rankings} shows the resulting rankings of"
+                          r" the criteria.")
 
-            # Unterschiede je Kriterium: nur noch als Satz, die Werte ergeben sich
-            # aus tab:weights-spread.
-            n_komb = len(daten["anker"])
-            vorne = (r"all \resval{lh-n-combinations}" if daten["lh_vorne"] == n_komb
-                     else r"\resval{lh-lead-above} of the \resval{lh-n-combinations}")
-            saetze = [
-                r"Split by criterion (Table~\ref{tab:weights-spread}), the models give a"
-                r" higher weight than the participants to the criterion that the participants"
-                f" rank first in {vorne} combinations of model and case.",
-            ]
-            for c in CRIT:
-                for zaehler, richtung in ((daten["lh_unter"], "lower"),
-                                          (daten["lh_ueber"], "higher")):
-                    if zaehler.get(c) == n_komb:
-                        saetze.append(f"{tex(CRIT_LABEL[c])} receives a {richtung} weight from"
-                                      " the models than from the participants in every"
-                                      " combination.")
-            if "rankings" in vorhandene:
-                saetze.append(
-                    r"Figure~\ref{fig:weights-rankings} shows the same material as rankings:"
-                    r" the share of runs or participants per resulting order of the"
-                    r" \resval{n-criteria} criteria.")
-            absaetze.append(absatz(saetze))
-
-        teile.append("\\subsection{Agreement with " + aufzaehlen(ziele) + "}\n"
-                     "\\label{sec:results-weights-agreement}\n\n" + "\n\n".join(absaetze))
-        teile.append(agreement_section(sources, cases, daten))
-        if daten["anker"] and "rankings" in vorhandene:
+        teile.append("\\subsection{Comparison with the participants}\n"
+                     "\\label{sec:results-weights-comparison}\n\n" + absatz(saetze))
+        teile.append(comparison_section(cases, daten))
+        if "rankings" in vorhandene:
             teile.append(figure(vorhandene["rankings"],
                                 "Criterion rankings per case and source, as a share of the runs "
                                 "or participants of that source.",
@@ -1208,16 +1354,18 @@ def build(runs: Path, out: Path, figure_dir: str, figure_ext: str,
     vals = Values()
     daten = collect(df, sources, cases, vals, gt)
     befragung = load_survey(survey)
-    probanden = set(df.loc[df["quelle"] == HUMAN_SOURCE, "run"].astype(int))
+    probanden = df[df["quelle"] == HUMAN_SOURCE]
     daten["stichprobe"] = sample(befragung, vals, probanden) if befragung is not None else None
 
     vorhandene = {}
     for schluessel, (name, _) in FIGURES.items():
-        pfad = (out.parent / figure_dir / f"{name}.{figure_ext}")
-        if pfad.is_file():
-            vorhandene[schluessel] = name
-        else:
-            print(f"Abbildung fehlt, wird ausgelassen: {pfad}")
+        for case in (cases if "{case}" in name else [None]):
+            datei = name.format(case=case)
+            pfad = (out.parent / figure_dir / f"{datei}.{figure_ext}")
+            if pfad.is_file():
+                vorhandene[f"{schluessel}-{case}" if case else schluessel] = datei
+            else:
+                print(f"Abbildung fehlt, wird ausgelassen: {pfad}")
 
     kopf = [
         f"% Erzeugt von {Path(__file__).name} aus {runs.name} "

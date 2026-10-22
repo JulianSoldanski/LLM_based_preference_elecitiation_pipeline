@@ -1,9 +1,10 @@
 """Bereinigt den SoSci-Export des Fragebogens.
 
-Entfernt alle Teilnahmen vor Nr. 160 sowie alle, bei denen mindestens ein
+Entfernt alle Teilnahmen vor Nr. 160, alle, bei denen mindestens ein
 Paarvergleich fehlt oder die auf einer der Fallseiten (Seite 4-6) weniger als
-30 Sekunden verbracht haben. Alles andere bleibt unverändert: gleiche Spalten, Beschriftungszeile,
-Werte und Format (UTF-8 mit BOM, Semikolon, CRLF).
+30 Sekunden verbracht haben, sowie einzeln benannte Ausreißer. Alles andere
+bleibt unverändert: gleiche Spalten, Beschriftungszeile, Werte und Format
+(UTF-8 mit BOM, Semikolon, CRLF).
 
     python3 src/clean_interviews.py results/InterviewResults/data_....csv
 """
@@ -39,6 +40,16 @@ MIN_SEKUNDEN = 30
 # Erste Teilnahme der Erhebung; fruehere Eintraege zaehlen nicht dazu.
 ERSTE_TEILNAHME = 160
 
+# Einzeln ausgeschlossene Teilnahmen (CASE -> Grund). Regel: Die Teilnahme setzt
+# bei einem Fall das Kriterium auf Rang 1, das die uebrigen Teilnahmen dort im
+# Mittel am niedrigsten gewichten (in Klammern: ihr Gewicht, Mittel der
+# uebrigen). build_results_tex.py prueft das gegen runs.csv.
+AUSREISSER = {
+    "160": "Ausreißer: Ketten, Flexibilität vorn (0,65; Mittel 0,07)",
+    "174": "Ausreißer: Batteriepacks, Liefertreue vorn (0,74; Mittel 0,12)",
+    "164": "Ausreißer: Konnektivitätsmodule, Kosten vorn (0,80; Mittel 0,13)",
+}
+
 
 def fehlende_vergleiche(zeile: dict[str, str]) -> list[str]:
     """Fehlende Items einer Teilnahme; leer, wenn alle Vergleiche vollständig sind.
@@ -66,7 +77,7 @@ def zu_schnelle_seiten(zeile: dict[str, str]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Entfernt Teilnahmen vor Nr. 160, mit fehlenden Paarvergleichen "
-                    "oder zu kurzer Verweildauer.")
+                    "oder zu kurzer Verweildauer sowie benannte Ausreißer.")
     parser.add_argument("export", type=Path, help="SoSci-CSV (data_*.csv)")
     parser.add_argument("--out", type=Path, help="Zieldatei (Default <export>_clean.csv)")
     args = parser.parse_args(argv)
@@ -89,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             entfernt.append((werte["CASE"], "fehlt: " + ", ".join(fehlend)))
         elif zu_schnell:
             entfernt.append((werte["CASE"], f"unter {MIN_SEKUNDEN} s: " + ", ".join(zu_schnell)))
+        elif werte["CASE"].strip() in AUSREISSER:
+            entfernt.append((werte["CASE"], AUSREISSER[werte["CASE"].strip()]))
         else:
             behalten.append(zeile)
 

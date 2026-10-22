@@ -386,6 +386,51 @@ Wachsen der Nachrichtenliste, eine ungültige Antwort mitten in der Sequenz, der
 Abbruch bei Netzfehler und die Reproduzierbarkeit der Permutation bei gleichem
 Seed.
 
+## Zuordnung von Passagen (Schritt 3)
+
+`src/assignment.py` ordnet jede Passage einzeln den Kriterien eines Katalogs zu.
+Es gibt einen Aufruf je Passage und keinen Fallkontext. Das Modul läuft
+unabhängig vom Paarvergleich und verändert ihn nicht.
+
+```bash
+python3 src/assignment.py --dry-run                                # Prompts + Schema ansehen
+python3 src/assignment.py --model gpt-4o-2024-08-06 --runs 5        # n Durchläufe
+python3 src/assignment_eval.py results/assignment/<datei>.json     # Metriken erneut berechnen
+python3 src/test_assignment.py
+```
+
+| Datei | Inhalt |
+| --- | --- |
+| `config/criteria_wang2004.yaml` | Katalog der Evaluation (DR, FR, CT): `code`, `name`, `definition` |
+| `config/criteria_scor_current.yaml` | Katalog des Artefakts, noch Platzhalter (Laden bricht ab) |
+| `prompts/assignment_v1.md` | Prompt mit `SYSTEM:`/`USER:`; neue Fassung = neue Datei `_v2` |
+| `data/passages_evaluation.csv` | die 9 Aussagen aus `cases.yaml`, neutrale IDs `P01`–`P09` |
+
+* **Eingabe:** CSV mit `passage_id`, `source` und `text`, optional `expected_criteria`.
+  Mehrere Codes werden mit `;` getrennt. `-` heißt „erwartet: kein Kriterium“,
+  eine leere Zelle „keine Ground Truth“.
+* **Antwort:** Die API bindet die Antwort an ein JSON-Schema (`passage_id`,
+  `justification`, `criteria`). Die erlaubten Codes stehen als Enum darin und
+  kommen aus dem Katalog. Dafür gibt es `complete_json()` in `agent.py`.
+  Anthropic unterstützt das ab Haiku 4.5.
+* **Prüfung:** Ungültiges JSON, eine falsche `passage_id`, unbekannte oder
+  doppelte Codes und Client-Fehler lösen genau eine identische Wiederholung aus.
+  Scheitert auch die, bekommt die Passage den Status `failed` und bleibt mit
+  beiden Rohantworten erhalten.
+* **Ausgabe:** `results/assignment/<stempel>_<provider>_<model>.json` und eine
+  `.log`-Datei. Die JSON-Datei enthält:
+  * `meta`: Parameter, Schema und SHA-256 von Prompt, Katalog und Passagen
+  * `summary` je Lauf, inklusive `missing_criteria`
+  * `records`: ein flacher Datensatz je Passage und Lauf
+  * `ground_truth`: getrennt von den Datensätzen, damit sie im Human Gate nicht
+    sichtbar ist
+
+  Das Gate ergänzt `action`, `new_criteria` und `comment` über
+  `(run_id, run, passage_id)`.
+* **Auswertung** (`assignment_eval.py`, läuft am Ende automatisch mit): je Lauf
+  Exact-Match-Accuracy und Precision/Recall je Kriterium. `failed` zählt als
+  leere Vorhersage.
+
 ## Nächste Schritte
 
 * **Offen: Auswertungsschritt.** Die Umrechnung der Rohurteile in

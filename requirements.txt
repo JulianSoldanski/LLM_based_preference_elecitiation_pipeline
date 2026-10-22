@@ -4,3 +4,6 @@ openai>=1.0
 
 # Nur nötig, wenn --provider anthropic genutzt wird:
 # anthropic>=0.40
+
+# Nur nötig, wenn --provider mistral genutzt wird:
+# mistralai>=2.0
