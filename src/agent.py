@@ -29,6 +29,18 @@ Message = dict[str, str]
 ENV_FILE = ROOT / ".env"
 
 
+@dataclass(frozen=True)
+class Completion:
+    """Antwort auf eine Anfrage mit JSON-Schema.
+
+    `model` ist die Modell-ID aus der API-Antwort, also der tatsächlich genutzte
+    Snapshot, nicht die angefragte Kennung.
+    """
+
+    text: str
+    model: str
+
+
 def load_env(path: Path = ENV_FILE) -> list[str]:
     """Übernimmt die API-Schlüssel aus .env in die Prozessumgebung.
 
@@ -76,6 +88,12 @@ class LLMClient(Protocol):
         """Wie complete(), aber mit vollständigem Gesprächsverlauf."""
         ...
 
+    def complete_json(
+        self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
+    ) -> Completion:
+        """Wie complete(), die Antwort ist aber über die API an `schema` gebunden."""
+        ...
+
 
 @dataclass
 class OpenAIClient:
@@ -104,6 +122,20 @@ class OpenAIClient:
             messages=[{"role": "system", "content": system}, *messages],
         )
         return completion.choices[0].message.content or ""
+
+    def complete_json(
+        self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
+    ) -> Completion:
+        completion = self._client.chat.completions.create(
+            model=self.model_id,
+            temperature=temperature,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": name, "strict": True, "schema": schema},
+            },
+        )
+        return Completion(completion.choices[0].message.content or "", completion.model)
 
 
 @dataclass
@@ -141,6 +173,23 @@ class AnthropicClient:
             block.text for block in message.content if getattr(block, "type", "") == "text"
         )
 
+    def complete_json(
+        self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
+    ) -> Completion:
+        # Strukturierte Ausgabe erst ab Haiku 4.5; ältere Modelle antworten mit 400.
+        message = self._client.messages.create(
+            model=self.model_id,
+            max_tokens=self.max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_config={"format": {"type": "json_schema", "schema": schema}},
+            extra_body={"temperature": temperature},
+        )
+        text = "".join(
+            block.text for block in message.content if getattr(block, "type", "") == "text"
+        )
+        return Completion(text, message.model)
+
 
 @dataclass
 class MistralClient:
@@ -174,6 +223,25 @@ class MistralClient:
                 chunk.text for chunk in content if getattr(chunk, "type", "") == "text"
             )
         return content or ""
+
+    def complete_json(
+        self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
+    ) -> Completion:
+        completion = self._client.chat.complete(
+            model=self.model_id,
+            temperature=temperature,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": name, "strict": True, "schema_definition": schema},
+            },
+        )
+        content = completion.choices[0].message.content
+        if isinstance(content, list):
+            content = "".join(
+                chunk.text for chunk in content if getattr(chunk, "type", "") == "text"
+            )
+        return Completion(content or "", completion.model)
 
 
 @dataclass
@@ -212,6 +280,13 @@ class EchoClient:
         if not self.responses:
             return ""
         return self.responses[(len(self.calls) - 1) % len(self.responses)]
+
+    def complete_json(
+        self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
+    ) -> Completion:
+        text = self.complete(system, user, temperature)
+        self.calls[-1]["schema"] = schema
+        return Completion(text, self.model_id)
 
 
 def build_client(provider: str, model: str, **kwargs: Any) -> LLMClient:

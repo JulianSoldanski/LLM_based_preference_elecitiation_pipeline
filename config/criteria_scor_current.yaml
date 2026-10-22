@@ -1,0 +1,10 @@
+# Kriterienkatalog des Artefakts (aktuelles SCOR-Modell). PLATZHALTER:
+# solange die Liste leer ist, bricht src/assignment.py mit einer Meldung ab.
+#
+# Aufbau wie criteria_wang2004.yaml:
+#   - code: XX
+#     name: ...
+#     definition: >-
+#       ...
+
+criteria: []

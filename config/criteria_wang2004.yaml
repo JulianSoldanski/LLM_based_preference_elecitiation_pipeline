@@ -1,0 +1,21 @@
+# Kriterienkatalog der Evaluation (Wang et al. 2004) für die Zuordnung
+# von Passagen (src/assignment.py). Die Codes sind die einzigen Werte, die das
+# Modell ausgeben darf; sie gehen als Enum in das Antwortschema.
+
+criteria:
+  - code: DR
+    name: Delivery reliability
+    definition: >-
+      delivery performance, fill rate, order fulfilment lead time, perfect
+      order fulfilment.
+
+  - code: FR
+    name: Flexibility and responsiveness
+    definition: >-
+      supply chain response time, production flexibility.
+
+  - code: CT
+    name: Cost
+    definition: >-
+      total logistics management cost, value-added productivity, warranty or
+      returns processing cost.
