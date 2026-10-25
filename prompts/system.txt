@@ -27,7 +27,7 @@ weiteren Text:
 
 {
   "comparisons": [
-    {"a": "<Kriterium links>", "b": "<Kriterium rechts>", "preference": "<Kriterium links>, <Kriterium rechts> oder <{{indifference}}>", "intensity": <{{indifference_intensity}} oder {{min_intensity}}-{{max_intensity}}>}
+    {"a": "<Kriterium links>", "b": "<Kriterium rechts>", {{justification_field}}"preference": "<Kriterium links>, <Kriterium rechts> oder <{{indifference}}>", "intensity": <{{indifference_intensity}} oder {{min_intensity}}-{{max_intensity}}>}
   ]
 }
 
@@ -37,4 +37,4 @@ Regeln:
   Kennungen aus der Frage.
 - "preference" ist entweder der Wert von "a", der Wert von "b" oder "{{indifference}}".
 - "intensity" ist eine ganze Zahl.
-- Gib keine Begründung, keinen Fließtext und keine zusätzlichen Felder aus.
+{{justification_rule}}

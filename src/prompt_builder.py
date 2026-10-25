@@ -8,9 +8,9 @@ oder Skalenvarianten erfordern deshalb keine Änderung an agent.py.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import yaml
 
@@ -29,6 +29,17 @@ PROMPTS_DIR = ROOT / "prompts"
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
+# Begründung je Paarvergleich, nur mit justification=True. Ohne die Option
+# ergeben die Platzhalter wörtlich den bisherigen Prompt, damit frühere Läufe
+# vergleichbar bleiben. Die Begründung steht wie in Schritt 3 vor dem Urteil.
+JUSTIFICATION_FIELD = '"justification": "<Begründung in ein bis zwei Sätzen>", '
+JUSTIFICATION_RULE = (
+    '- "justification" begründet den Vergleich in ein bis zwei Sätzen und nennt die\n'
+    '  Aussagen, auf die du dich stützt. Schreibe die Begründung vor "preference".\n'
+    "- Gib keinen weiteren Fließtext und keine zusätzlichen Felder aus."
+)
+NO_JUSTIFICATION_RULE = "- Gib keine Begründung, keinen Fließtext und keine zusätzlichen Felder aus."
+
 
 class ConfigError(RuntimeError):
     """Wissensbasis und Vorlagen passen nicht zusammen."""
@@ -43,6 +54,10 @@ class PromptBuilder:
     cases: list[Case]
     system_template: str
     user_template: str
+    # Code der Zuordnung (z.B. "DR") -> Kriterien-ID (z.B. "liefertreue")
+    assignment_codes: dict[str, str] = field(default_factory=dict)
+    # Modell begründet jeden Paarvergleich (Prompt und Validierung).
+    justification: bool = False
 
     def __post_init__(self) -> None:
         self._validate()
@@ -92,7 +107,39 @@ class PromptBuilder:
             cases=cases,
             system_template=_read_text(prompts_dir / "system.txt"),
             user_template=_read_text(prompts_dir / "user.txt"),
+            assignment_codes={
+                str(entry["assignment_code"]): str(entry["id"])
+                for entry in criteria_raw.get("criteria", [])
+                if entry.get("assignment_code")
+            },
         )
+
+    def with_gate1(self, gate_results: Iterable[dict[str, Any]]) -> "PromptBuilder":
+        """Neue Instanz, deren Fälle die Aussagen aus validierten Gate-1-
+        Ergebnissen beziehen (je Fall eines, siehe gate1_cli.load_validated).
+
+        Titel, Bauteil und statement_order bleiben aus cases.yaml. Mehrere
+        Passagen eines Kriteriums werden in ihrer Dokumentreihenfolge zu einer
+        Aussage verbunden. Die Vorlagen bleiben unverändert; die Validierung
+        prüft wie bisher, dass jeder Fall jedes Kriterium genau einmal belegt.
+        """
+        cases = []
+        for gate in gate_results:
+            vorlage = self.case(gate["case_id"])
+            texte = {p["passage_id"]: _clean(p["text"]) for p in sorted(gate["passages"], key=lambda p: p["position"])}
+            statements = {}
+            for code, passage_ids in gate["validated_evidence"].items():
+                if code not in self.assignment_codes:
+                    raise ConfigError(f"Fall {vorlage.id!r}: Code {code!r} hat kein assignment_code in criteria.yaml")
+                reihenfolge = [pid for pid in texte if pid in passage_ids]
+                statements[self.assignment_codes[code]] = " ".join(texte[pid] for pid in reihenfolge)
+            cases.append(replace(vorlage, statements=statements))
+        if not cases:
+            raise ConfigError("Keine Gate-1-Ergebnisse übergeben.")
+        # Reihenfolge aus cases.yaml, unabhängig von der Reihenfolge der Dateien:
+        # in der stateless-Bedingung ist sie die erhobene Reihenfolge.
+        cases.sort(key=lambda case: self.case_ids().index(case.id))
+        return replace(self, cases=cases)
 
     # ------------------------------------------------------------- Zugriffe
 
@@ -135,6 +182,8 @@ class PromptBuilder:
                 "min_intensity": str(MIN_INTENSITY),
                 "max_intensity": str(MAX_INTENSITY),
                 "comparison_count": str(len(self.comparison_order)),
+                "justification_field": JUSTIFICATION_FIELD if self.justification else "",
+                "justification_rule": JUSTIFICATION_RULE if self.justification else NO_JUSTIFICATION_RULE,
             },
         )
 
@@ -232,6 +281,11 @@ class PromptBuilder:
                     f"Fall {case.id!r}: statement_order {list(case.statement_order)} ist "
                     f"keine Permutation der Kriterien {sorted(known)}."
                 )
+
+        if self.assignment_codes and sorted(self.assignment_codes.values()) != sorted(ids):
+            problems.append(
+                f"assignment_code muss jedem Kriterium genau einen eigenen Code geben: {self.assignment_codes}"
+            )
 
         if not self.scale.get("levels"):
             problems.append("Die Skala enthält keine Stufen.")

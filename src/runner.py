@@ -11,6 +11,7 @@ import argparse
 import random
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -19,6 +20,8 @@ from prompt_builder import ROOT, PromptBuilder
 from schema import CONDITION_HISTORY, CONDITION_STATELESS, Response
 
 RESULTS_DIR = ROOT / "results"
+# Dateinamenszusatz für Läufe mit Begründung: anderer Prompt, andere Messung.
+JUSTIFICATION_SUFFIX = "_justification"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -53,9 +56,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "ohne Angabe wird einer gezogen und in den Metadaten festgehalten.",
     )
     parser.add_argument(
+        "--justification",
+        action="store_true",
+        help="Modell begründet jeden Paarvergleich. Ändert den Prompt; Ergebnisse "
+        "landen in einer eigenen Datei (Suffix _justification).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Gibt alle Prompts aus, ohne ein Modell aufzurufen.",
+    )
+    parser.add_argument(
+        "--gate1",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="Validierte Gate-1-Dateien (<lauf>_r<n>_<fall>_gate1.json), eine je Fall. "
+        "Die Aussagen kommen ausschließlich von dort.",
     )
 
     args = parser.parse_args(argv)
@@ -71,9 +88,10 @@ def model_slug(model: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", model)
 
 
-def default_out_path(provider: str, model: str, condition: str) -> Path:
+def default_out_path(provider: str, model: str, condition: str, justification: bool = False) -> Path:
     """Je Anbieter/Modell/Bedingung eine eigene Datei, damit nichts vermischt."""
-    return RESULTS_DIR / f"{provider}_{model_slug(model)}_{condition}.jsonl"
+    zusatz = JUSTIFICATION_SUFFIX if justification else ""
+    return RESULTS_DIR / f"{provider}_{model_slug(model)}_{condition}{zusatz}.jsonl"
 
 
 def resolve_seed(condition: str, seed: int | None) -> int | None:
@@ -128,6 +146,21 @@ def resolve_cases(builder: PromptBuilder, selected: list[str] | None) -> list[st
     return selected
 
 
+def builder_aus_gate1(
+    paths: list[Path], justification: bool = False
+) -> tuple[PromptBuilder, list[dict[str, str]]]:
+    """Schritt 5 liest nur den validierten Output von Gate 1. Import hier,
+    weil gate1_cli über assignment dieses Modul importiert."""
+    from gate1 import GateError
+    from gate1_cli import builder_from_gate1
+
+    try:
+        builder, quellen = builder_from_gate1(paths)
+    except GateError as exc:
+        raise SystemExit(f"Gate 1: {exc}") from None
+    return replace(builder, justification=justification), quellen
+
+
 def print_prompts(builder: PromptBuilder, case_ids: list[str]) -> None:
     print("=" * 72)
     print("SYSTEM-PROMPT (für alle Fälle identisch)")
@@ -143,7 +176,7 @@ def print_prompts(builder: PromptBuilder, case_ids: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    builder = PromptBuilder.from_paths()
+    builder, _ = builder_aus_gate1(args.gate1, args.justification)
     case_ids = resolve_cases(builder, args.cases)
 
     # Auch im Trockenlauf warnen: dort wird der Prompt vor der Erhebung geprüft.
@@ -153,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         print_prompts(builder, case_ids)
         return 0
 
-    out_path = args.out or default_out_path(args.provider, args.model, args.condition)
+    out_path = args.out or default_out_path(args.provider, args.model, args.condition, args.justification)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     agent = AhpAgent(

@@ -19,11 +19,14 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from agent import AhpAgent, LLMClient, build_client
 from prompt_builder import PromptBuilder
 from runner import (
+    JUSTIFICATION_SUFFIX,
     RESULTS_DIR,
+    builder_aus_gate1,
     case_sequences,
     model_slug,
     resolve_cases,
@@ -65,6 +68,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--out-dir", type=Path, default=RESULTS_DIR, help="Zielverzeichnis (Default results/)"
     )
     parser.add_argument("--quiet", action="store_true", help="Keine Konsolenausgabe")
+    parser.add_argument(
+        "--justification",
+        action="store_true",
+        help="Modell begründet jeden Paarvergleich. Ändert den Prompt; Ergebnisse "
+        "landen in einer eigenen Datei (Suffix _justification).",
+    )
+    parser.add_argument(
+        "--gate1",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="Validierte Gate-1-Dateien, eine je Fall. Die Aussagen kommen ausschließlich von dort.",
+    )
 
     args = parser.parse_args(argv)
     if args.runs < 1:
@@ -108,8 +124,13 @@ def run_experiment(
     seed: int | None = None,
     out_dir: Path = RESULTS_DIR,
     quiet: bool = False,
+    gate1: list[dict[str, str]] | None = None,
+    progress: Callable[[int, str, Response | None], None] | None = None,
 ) -> tuple[Path, Path]:
-    """Führt den Durchlauf aus und gibt (JSON-Pfad, Log-Pfad) zurück."""
+    """Führt den Durchlauf aus und gibt (JSON-Pfad, Log-Pfad) zurück.
+    gate1: Name und SHA-256 der Gate-1-Dateien, aus denen die Aussagen stammen.
+    progress(run, case_id, response) je Fall vor (response=None) und nach dem
+    Modellaufruf, nur für Fortschrittsanzeigen."""
     start = datetime.now(timezone.utc)
     seed = resolve_seed(condition, seed)
     folgen = case_sequences(case_ids, runs, condition, seed)
@@ -117,6 +138,7 @@ def run_experiment(
     stamm = (
         f"{start.astimezone().strftime(ZEITFORMAT_DATEI)}_"
         f"{client.provider}_{model_slug(client.model_id)}_{condition}"
+        f"{JUSTIFICATION_SUFFIX if builder.justification else ''}"
     )
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -134,10 +156,12 @@ def run_experiment(
         "model": client.model_id,
         "temperature": temperature,
         "condition": condition,
+        "justification": builder.justification,
         "seed": seed,
         "runs": runs,
         "cases": list(case_ids),
         "sequences": folgen,
+        "gate1": gate1,
         "prompts": prompts,
     }
     antworten: list[Response] = []
@@ -163,11 +187,18 @@ def run_experiment(
         # Wiederholungen außen, Fälle innen: ein Abbruch hinterlässt
         # vollständige Durchgänge über alle Fälle.
         for run, folge in enumerate(folgen, start=1):
+            melden = (lambda case_id, response, run=run: progress(run, case_id, response)) if progress else None
             if condition == CONDITION_HISTORY:
                 logger.info("Lauf %d/%d Reihenfolge: %s", run, runs, ", ".join(folge))
-                lauf = agent.judge_sequence(folge, run=run, seed=seed)
+                lauf = agent.judge_sequence(folge, run=run, seed=seed, on_case=melden)
             else:
-                lauf = [agent.judge(case_id, run=run) for case_id in folge]
+                lauf = []
+                for case_id in folge:
+                    if melden:
+                        melden(case_id, None)
+                    lauf.append(agent.judge(case_id, run=run))
+                    if melden:
+                        melden(case_id, lauf[-1])
 
             for response in lauf:
                 antworten.append(response)
@@ -207,6 +238,7 @@ def _protokolliere(logger: logging.Logger, response: Response, run: int, runs: i
 
     zeilen = [
         f"  {index}. {c.a} vs. {c.b} -> {c.preference} ({c.intensity})"
+        + (f"\n     Begründung: {c.justification}" if c.justification else "")
         for index, c in enumerate(response.comparisons, start=1)
     ]
     for fehler in response.errors:
@@ -246,7 +278,7 @@ def _schreibe_json(path: Path, dokument: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    builder = PromptBuilder.from_paths()
+    builder, quellen = builder_aus_gate1(args.gate1, args.justification)
     case_ids = resolve_cases(builder, args.cases)
     warne_ohne_unabhaengigkeitshinweis(builder, args.condition)
     client = build_client(args.provider, args.model)
@@ -261,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         out_dir=args.out_dir,
         quiet=args.quiet,
+        gate1=quellen,
     )
     return 0
 

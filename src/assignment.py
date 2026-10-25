@@ -1,17 +1,19 @@
 """Zuordnung von Passagen zu Kriterien (Schritt 3, vor dem Paarvergleich).
 
-Ein LLM ordnet jede Passage einzeln den Kriterien eines geladenen Katalogs zu:
-ein Aufruf je Passage, kein Fallkontext, keine Gewichtung. Die Antwort ist über
-das API-Schema an die Codes des Katalogs gebunden und wird zusätzlich im Code
-geprüft. Eine ungültige Antwort wird genau einmal mit identischer Anfrage
+Ein LLM ordnet jede Passage einzeln genau einem Kriterium eines geladenen
+Katalogs zu oder "none": ein Aufruf je Passage, kein Fallkontext, keine
+Gewichtung. Die Antwort ist über das API-Schema an die Codes des Katalogs
+gebunden und wird zusätzlich im Code geprüft. Eine ungültige Antwort wird genau einmal mit identischer Anfrage
 wiederholt; scheitert auch die, bleibt die Passage als "failed" im Ergebnis.
 
     python3 src/assignment.py --dry-run
     python3 src/assignment.py --model gpt-4o-2024-08-06 --runs 5
 
-Jeder Datensatz ist eine flache Zeile je Passage und Lauf. Das Human Gate
-ergänzt action, new_criteria und comment über (run_id, run, passage_id); dieser
-Code liest die Datensätze nie zurück und muss dafür nicht geändert werden.
+Jeder Datensatz ist eine flache Zeile je Passage und Lauf. "criteria" ist eine
+Liste mit höchstens einem Code ([] = "none"), damit Auswertung und ältere
+Läufe mit assignment_v1 (mehrere Codes) dasselbe Format haben. doc_id und
+position werden aus der Passagendatei durchgereicht, aber nie in den Prompt
+gesetzt. Gate 1 (gate1.py) liest die Datensätze, dieser Code nie zurück.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent import LLMClient, build_client
 from experiment import ZEITFORMAT_DATEI, _schreibe_json, setup_logger
@@ -44,7 +46,7 @@ from runner import RESULTS_DIR, model_slug
 from schema import Criterion, strip_code_fence
 
 CRITERIA_FILE = CONFIG_DIR / "criteria_wang2004.yaml"
-PROMPT_FILE = PROMPTS_DIR / "assignment_v1.md"
+PROMPT_FILE = PROMPTS_DIR / "assignment_v2.md"
 PASSAGES_FILE = ROOT / "data" / "passages_evaluation.csv"
 OUT_DIR = RESULTS_DIR / "assignment"
 
@@ -55,6 +57,8 @@ MAX_ATTEMPTS = 2
 # expected_criteria in der Passagendatei: leere Zelle = keine Ground Truth,
 # "-" = erwartet ist kein Kriterium, sonst Codes durch ";" getrennt.
 NO_CRITERION = "-"
+# Antwort des Modells, wenn die Passage keinem Kriterium entspricht.
+NONE = "none"
 
 _SECTIONS = re.compile(r"\s*SYSTEM:\s*\n(?P<system>.*?)\n\s*USER:\s*\n(?P<user>.*)", re.DOTALL)
 
@@ -77,11 +81,14 @@ def load_criteria(path: Path) -> list[Criterion]:
     codes = [c.id for c in criteria]
     if len(set(codes)) != len(codes):
         raise ConfigError(f"Doppelte Codes in {path}: {codes}")
+    if NONE in codes:
+        raise ConfigError(f"{path}: {NONE!r} ist als Code reserviert.")
     return criteria
 
 
 def load_passages(path: Path, codes: list[str]) -> list[dict[str, Any]]:
-    """Passagen aus CSV: passage_id, source, text, optional expected_criteria."""
+    """Passagen aus CSV: passage_id, doc_id, position, source, text, optional
+    expected_criteria. position ist die Stelle der Passage im Dokument (ab 1)."""
     if not path.is_file():
         raise ConfigError(f"Passagendatei fehlt: {path}")
     with path.open(encoding="utf-8-sig", newline="") as handle:
@@ -91,8 +98,13 @@ def load_passages(path: Path, codes: list[str]) -> list[dict[str, Any]]:
     problems: list[str] = []
     for zeile, row in enumerate(rows, start=2):  # Zeile 1 ist der Kopf
         passage_id = (row.get("passage_id") or "").strip()
-        if not passage_id or not (row.get("source") or "").strip() or not (row.get("text") or "").strip():
-            problems.append(f"Zeile {zeile}: passage_id, source oder text fehlt")
+        pflicht = ("passage_id", "doc_id", "position", "source", "text")
+        if any(not (row.get(feld) or "").strip() for feld in pflicht):
+            problems.append(f"Zeile {zeile}: eines der Felder {', '.join(pflicht)} fehlt")
+            continue
+        position = row["position"].strip()
+        if not position.isdigit() or int(position) < 1:
+            problems.append(f"Zeile {zeile}: position {position!r} ist keine Zahl ab 1")
             continue
         expected = _parse_expected(row.get("expected_criteria"))
         if expected and set(expected) - set(codes):
@@ -100,6 +112,8 @@ def load_passages(path: Path, codes: list[str]) -> list[dict[str, Any]]:
         passages.append(
             {
                 "passage_id": passage_id,
+                "doc_id": row["doc_id"].strip(),
+                "position": int(position),
                 "source": row["source"].strip(),
                 "text": row["text"],
                 "expected_criteria": expected,
@@ -109,6 +123,9 @@ def load_passages(path: Path, codes: list[str]) -> list[dict[str, Any]]:
     ids = [p["passage_id"] for p in passages]
     if len(set(ids)) != len(ids):
         problems.append(f"Doppelte passage_id: {sorted(i for i, n in Counter(ids).items() if n > 1)}")
+    stellen = [(p["doc_id"], p["position"]) for p in passages]
+    if len(set(stellen)) != len(stellen):
+        problems.append(f"Doppelte position im selben Dokument: {sorted(s for s, n in Counter(stellen).items() if n > 1)}")
     if not rows:
         problems.append("Die Datei enthält keine Passagen.")
     if problems:
@@ -147,16 +164,18 @@ def fill(template: str, values: dict[str, str]) -> str:
 
 
 def output_schema(codes: list[str]) -> dict[str, Any]:
-    """Antwortschema. justification steht vor criteria, damit die Begründung
-    vor der Zuordnung erzeugt wird; criteria ist auf die Codes beschränkt."""
+    """Antwortschema. justification steht vor criterion, damit die Begründung
+    vor der Zuordnung erzeugt wird. criterion ist genau ein Code oder "none";
+    ein Enum statt einer Liste mit maxItems, weil das alle Anbieter im
+    strikten Modus unterstützen."""
     return {
         "type": "object",
         "properties": {
             "passage_id": {"type": "string"},
             "justification": {"type": "string"},
-            "criteria": {"type": "array", "items": {"type": "string", "enum": list(codes)}},
+            "criterion": {"type": "string", "enum": [*codes, NONE]},
         },
-        "required": ["passage_id", "justification", "criteria"],
+        "required": ["passage_id", "justification", "criterion"],
         "additionalProperties": False,
     }
 
@@ -184,7 +203,8 @@ def prepare(passages_path: Path, criteria_path: Path, prompt_path: Path) -> dict
 
 
 def parse_assignment(raw: str, passage_id: str, codes: list[str]) -> tuple[list[str], str, list[str]]:
-    """Prüft eine Rohantwort. Rückgabe (criteria, justification, errors)."""
+    """Prüft eine Rohantwort. Rückgabe (criteria, justification, errors);
+    criteria ist [code] oder [] für "none"."""
     text = strip_code_fence(raw or "").strip()
     if not text:
         return [], "", ["Leere Antwort"]
@@ -201,19 +221,13 @@ def parse_assignment(raw: str, passage_id: str, codes: list[str]) -> tuple[list[
     justification = payload.get("justification")
     if not isinstance(justification, str):
         errors.append('Feld "justification" fehlt oder ist kein Text')
-    criteria = payload.get("criteria")
-    if not isinstance(criteria, list):
-        errors.append('Feld "criteria" fehlt oder ist keine Liste')
-    else:
-        unbekannt = [c for c in criteria if c not in codes]
-        if unbekannt:
-            errors.append(f"Unbekannte Kriterien {unbekannt}, erlaubt sind {codes}")
-        elif len(set(criteria)) != len(criteria):
-            errors.append(f"Kriterium doppelt genannt: {criteria}")
+    criterion = payload.get("criterion")
+    if criterion != NONE and criterion not in codes:
+        errors.append(f"Unbekanntes Kriterium {criterion!r}, erlaubt sind {[*codes, NONE]}")
 
     if errors:
         return [], "", errors
-    return criteria, justification, []
+    return ([] if criterion == NONE else [criterion]), justification, []
 
 
 def assign(
@@ -276,8 +290,12 @@ def run_assignment(
     temperature: float = 0.0,
     out_dir: Path = OUT_DIR,
     quiet: bool = False,
+    progress: Callable[[int, dict[str, Any], dict[str, Any] | None], None] | None = None,
 ) -> tuple[Path, Path]:
-    """n Durchläufe über alle Passagen. Gibt (JSON-Pfad, Log-Pfad) zurück."""
+    """n Durchläufe über alle Passagen. Gibt (JSON-Pfad, Log-Pfad) zurück.
+
+    progress(run, passage, record) wird je Passage zweimal gerufen: vor dem
+    Modellaufruf mit record=None und danach mit dem fertigen Datensatz."""
     eingabe = prepare(passages_path, criteria_path, prompt_path)
     start = datetime.now(timezone.utc)
     run_id = f"{start.astimezone().strftime(ZEITFORMAT_DATEI)}_{client.provider}_{model_slug(client.model_id)}"
@@ -329,6 +347,8 @@ def run_assignment(
         for run in range(1, runs + 1):
             for passage in eingabe["passages"]:
                 pid = passage["passage_id"]
+                if progress:
+                    progress(run, passage, None)
                 ergebnis = assign(
                     client, eingabe["system"], eingabe["user"][pid], pid,
                     eingabe["codes"], eingabe["schema"], temperature,
@@ -337,6 +357,8 @@ def run_assignment(
                     "run_id": run_id,
                     "run": run,
                     "passage_id": pid,
+                    "doc_id": passage["doc_id"],
+                    "position": passage["position"],
                     "source": passage["source"],
                     "text": passage["text"],
                     "criteria": ergebnis["criteria"],
@@ -357,6 +379,8 @@ def run_assignment(
                 _protokolliere(logger, record, runs)
                 # Nach jeder Passage schreiben: ein Abbruch vernichtet nichts.
                 _schreibe_json(json_path, dokument)
+                if progress:
+                    progress(run, passage, record)
 
         meta["finished"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         _schreibe_json(json_path, dokument)

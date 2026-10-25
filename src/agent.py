@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Any, Callable, Protocol, Sequence, runtime_checkable
 
 from prompt_builder import ROOT, PromptBuilder
 from schema import (
@@ -330,11 +330,16 @@ class AhpAgent:
                 case_id, run, raw="", errors=[f"Client-Fehler: {type(exc).__name__}: {exc}"]
             )
 
-        comparisons, errors = parse_response(raw, self.builder.expected_pairs())
+        comparisons, errors = parse_response(raw, self.builder.expected_pairs(), self.builder.justification)
         return self._response(case_id, run, raw=raw, comparisons=comparisons, errors=errors)
 
     def judge_sequence(
-        self, case_ids: Sequence[str], run: int = 1, *, seed: int | None = None
+        self,
+        case_ids: Sequence[str],
+        run: int = 1,
+        *,
+        seed: int | None = None,
+        on_case: Callable[[str, Response | None], None] | None = None,
     ) -> list[Response]:
         """Arbeitet alle Fälle in einer Konversation ab.
 
@@ -342,6 +347,9 @@ class AhpAgent:
         er steht einmal im System-Prompt, so wie er bei den Probanden einmal in
         der Einleitung steht. Eine Wiederholung würde die Instruktion für das
         Modell stärker machen als für die Menschen.
+
+        on_case(case_id, None) vor jedem Aufruf und on_case(case_id, response)
+        danach, nur für Fortschrittsanzeigen; am Verlauf ändert es nichts.
         """
         system = self.builder.build_system()
         sequence = list(case_ids)
@@ -350,6 +358,8 @@ class AhpAgent:
 
         for position, case_id in enumerate(sequence):
             messages.append({"role": "user", "content": self.builder.build_user(case_id)})
+            if on_case:
+                on_case(case_id, None)
             meta = {
                 "condition": CONDITION_HISTORY,
                 "position": position,
@@ -372,16 +382,20 @@ class AhpAgent:
                         **meta,
                     )
                 )
+                if on_case:
+                    on_case(case_id, responses[-1])
                 break
 
             # Rohantwort unverändert in den Verlauf, auch wenn sie ungültig ist:
             # repariert oder weggelassen wäre es nicht mehr der Kontext, den das
             # Modell tatsächlich gesehen hat.
             messages.append({"role": "assistant", "content": raw})
-            comparisons, errors = parse_response(raw, self.builder.expected_pairs())
+            comparisons, errors = parse_response(raw, self.builder.expected_pairs(), self.builder.justification)
             responses.append(
                 self._response(case_id, run, raw=raw, comparisons=comparisons, errors=errors, **meta)
             )
+            if on_case:
+                on_case(case_id, responses[-1])
 
         return responses
 

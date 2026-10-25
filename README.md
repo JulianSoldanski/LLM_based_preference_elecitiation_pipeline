@@ -132,29 +132,43 @@ Es gibt zwei Einstiegspunkte mit derselben Erhebungslogik: `runner.py`
 schreibt schlank JSONL, `experiment.py` dokumentiert einen Durchlauf zusätzlich
 in einer Logdatei und bündelt die Ergebnisse in einer JSON-Datei.
 
+Beide lesen die Aussagen **ausschließlich** aus validierten Gate-1-Dateien
+(`--gate1`, eine je Fall, siehe [Gate 1](#gate-1-schritt-4)). Szenario, Titel,
+Bauteil und `statement_order` kommen weiter aus `cases.yaml`; die Aussagen dort
+dienen nur noch als Referenz für Tests und Passagendatei.
+
 ```bash
+G=results/assignment/<lauf>_r1_*_gate1.json
+
 # Alle Prompts ansehen, ohne ein Modell aufzurufen
-python3 src/runner.py --dry-run
+python3 src/runner.py --dry-run --gate1 $G
 
 # Erhebung in der Hauptbedingung: drei Fälle in einer Konversation, 5 Durchläufe
-python3 src/runner.py --model gpt-4o --runs 5 --seed 42
+python3 src/runner.py --model gpt-4o --runs 5 --seed 42 --gate1 $G
 
 # Kontrollbedingung: jeder Fall in eigenem Kontext
-python3 src/runner.py --model gpt-4o --runs 5 --condition stateless
+python3 src/runner.py --model gpt-4o --runs 5 --condition stateless --gate1 $G
 
 # Anderer Anbieter, eigener Ausgabepfad, nur ein Fall
 python3 src/runner.py --provider anthropic --model claude-opus-4-5 \
-        --case ketten --temperature 0.7 --out results/pilot.jsonl
-
-# Mistral
-python3 src/experiment.py --provider mistral --model mistral-small-2603 --runs 10 --seed 42
+        --case ketten --temperature 0.7 --out results/pilot.jsonl --gate1 $G
 
 # Dokumentierter Durchlauf: 10 Wiederholungen über alle Fälle
-python3 src/experiment.py --model gpt-4o --runs 10 --seed 42
+python3 src/experiment.py --model gpt-4o --runs 10 --seed 42 --gate1 $G
+
+# Variante mit Begründung: das Modell begründet jeden Paarvergleich
+python3 src/experiment.py --model gpt-4o --runs 10 --condition stateless --justification --gate1 $G
 
 # Tests (kein Netzzugriff nötig)
 python3 src/test_pipeline.py
 ```
+
+`--justification` (im Viewer: „mit Begründung“) ergänzt jeden Vergleich um das
+Feld `justification`. Das Modell schreibt es vor `preference`, wie die
+Begründung in Schritt 3, und eine fehlende oder leere Begründung macht die
+Antwort ungültig. Weil sich damit der Prompt ändert, landen solche Läufe in
+eigenen Dateien (Suffix `_justification`, in der JSON `meta.justification`).
+Ohne die Option ist der Prompt unverändert.
 
 | Option | Bedeutung |
 | --- | --- |
@@ -388,9 +402,10 @@ Seed.
 
 ## Zuordnung von Passagen (Schritt 3)
 
-`src/assignment.py` ordnet jede Passage einzeln den Kriterien eines Katalogs zu.
-Es gibt einen Aufruf je Passage und keinen Fallkontext. Das Modul läuft
-unabhängig vom Paarvergleich und verändert ihn nicht.
+`src/assignment.py` ordnet jede Passage einzeln **genau einem** Kriterium eines
+Katalogs zu oder `"none"`. Es gibt einen Aufruf je Passage und keinen
+Fallkontext. Live verfolgen lässt sich ein Lauf mit `python3 src/viewer.py`
+(http://127.0.0.1:8000).
 
 ```bash
 python3 src/assignment.py --dry-run                                # Prompts + Schema ansehen
@@ -403,18 +418,22 @@ python3 src/test_assignment.py
 | --- | --- |
 | `config/criteria_wang2004.yaml` | Katalog der Evaluation (DR, FR, CT): `code`, `name`, `definition` |
 | `config/criteria_scor_current.yaml` | Katalog des Artefakts, noch Platzhalter (Laden bricht ab) |
-| `prompts/assignment_v1.md` | Prompt mit `SYSTEM:`/`USER:`; neue Fassung = neue Datei `_v2` |
+| `prompts/assignment_v2.md` | aktueller Prompt (genau ein Kriterium); `assignment_v1.md` (Liste) bleibt als Archiv |
 | `data/passages_evaluation.csv` | die 9 Aussagen aus `cases.yaml`, neutrale IDs `P01`–`P09` |
 
-* **Eingabe:** CSV mit `passage_id`, `source` und `text`, optional `expected_criteria`.
+* **Eingabe:** CSV mit `passage_id`, `doc_id`, `position`, `source` und `text`,
+  optional `expected_criteria`. `doc_id` ist vorerst der Fall, `position` die
+  Stelle im Dokument; beide werden durchgereicht, aber nie in den Prompt gesetzt.
   Mehrere Codes werden mit `;` getrennt. `-` heißt „erwartet: kein Kriterium“,
   eine leere Zelle „keine Ground Truth“.
 * **Antwort:** Die API bindet die Antwort an ein JSON-Schema (`passage_id`,
-  `justification`, `criteria`). Die erlaubten Codes stehen als Enum darin und
-  kommen aus dem Katalog. Dafür gibt es `complete_json()` in `agent.py`.
+  `justification`, `criterion`). Die erlaubten Werte (Codes des Katalogs und
+  `none`) stehen als Enum darin. Im Datensatz steht weiter die Liste `criteria`
+  mit höchstens einem Code (`[]` = none), damit ältere v1-Läufe dasselbe Format
+  haben. Dafür gibt es `complete_json()` in `agent.py`.
   Anthropic unterstützt das ab Haiku 4.5.
-* **Prüfung:** Ungültiges JSON, eine falsche `passage_id`, unbekannte oder
-  doppelte Codes und Client-Fehler lösen genau eine identische Wiederholung aus.
+* **Prüfung:** Ungültiges JSON, eine falsche `passage_id`, ein unbekannter Code
+  und Client-Fehler lösen genau eine identische Wiederholung aus.
   Scheitert auch die, bekommt die Passage den Status `failed` und bleibt mit
   beiden Rohantworten erhalten.
 * **Ausgabe:** `results/assignment/<stempel>_<provider>_<model>.json` und eine
@@ -422,14 +441,53 @@ python3 src/test_assignment.py
   * `meta`: Parameter, Schema und SHA-256 von Prompt, Katalog und Passagen
   * `summary` je Lauf, inklusive `missing_criteria`
   * `records`: ein flacher Datensatz je Passage und Lauf
-  * `ground_truth`: getrennt von den Datensätzen, damit sie im Human Gate nicht
+  * `ground_truth`: getrennt von den Datensätzen, damit sie in Gate 1 nicht
     sichtbar ist
-
-  Das Gate ergänzt `action`, `new_criteria` und `comment` über
-  `(run_id, run, passage_id)`.
 * **Auswertung** (`assignment_eval.py`, läuft am Ende automatisch mit): je Lauf
   Exact-Match-Accuracy und Precision/Recall je Kriterium. `failed` zählt als
   leere Vorhersage.
+
+## Gate 1 (Schritt 4)
+
+Ein Mensch prüft die Zuordnung **eines Laufs** je Fall, bevor Paarvergleiche
+gemacht werden. Die Entscheidung ist final.
+
+Üblicher Weg: im Viewer (`python3 src/viewer.py`) nach dem Lauf „Gate 1
+starten“. Die CLI ist eine zweite Oberfläche auf derselben Logik und schreibt
+dieselben Dateien.
+
+```bash
+python3 src/gate1_cli.py results/assignment/<lauf>.json --run 1 --reviewer JS   # interaktiv
+python3 src/gate1_cli.py results/assignment/<lauf>.json --run 1 --auto          # autonom: alles bestätigen
+python3 src/test_gate1.py
+```
+
+* **Logik** in `src/gate1.py`: `apply_gate1(assignments, actions, hierarchy)` ist
+  eine reine, deterministische Funktion mit allen Regeln; `autonomous()` ist
+  dieselbe Funktion mit „alles bestätigen“. Viewer und `src/gate1_cli.py`
+  sammeln nur die Aktionen; gespeichert wird in beiden Fällen über
+  `gate1_cli.speichern()`.
+* **Aktionen je Passage:** `confirm`; `delete` und `reassign` (auf ein Kriterium
+  der Hierarchie oder `none`) nur mit Begründung. Neue Kriterien gibt es nicht.
+  Eine fehlgeschlagene Zuordnung kommt als `none` ins Gate.
+* **Fallentscheidung:** `continue` erst, wenn jede Passage eine Aktion hat und
+  jedes Kriterium Evidenz hat (der Paarvergleich braucht je Fall genau eine
+  Aussage pro Kriterium). Sonst nur `need_more_input` → Status
+  `stopped_at_gate1`, nichts geht an Schritt 5. Der autonome Modus wählt
+  `need_more_input`, wenn Evidenz fehlt.
+* **Ausgabe** je Fall: `<lauf>_r<n>_<fall>_gate1.json` mit `validated_evidence`,
+  `criteria_without_evidence`, `counts`, `decision`, `reviewer`, `mode`, dem
+  Endstand je Passage sowie `gate_opened`/`gate_closed` für die
+  Aufwandsmessung. Die Datei ist danach schreibgeschützt.
+* **Ereignislog** `<lauf>_events.jsonl` (nur anhängen): eine Zeile je Aktion
+  (`GateAction`) und eine für die Fallentscheidung (`GateDecision`, mit
+  SHA-256 der Ergebnisdatei).
+* **Übergabe an Schritt 5:** nur über `gate1_cli.load_validated()`, das den
+  Hash gegen das Log prüft und nur `continue` herausgibt. Mehrere Passagen
+  eines Kriteriums werden in Dokumentreihenfolge zu einer Aussage verbunden;
+  `assignment_code` in `config/criteria.yaml` bildet die Codes (DR, FR, CT) auf
+  die Kriterien des Paarvergleichs ab. Bei korrekter Zuordnung und „alles
+  bestätigen“ sind die Prompts zeichengleich mit dem Fragebogen (Test).
 
 ## Nächste Schritte
 

@@ -64,12 +64,18 @@ class Case:
 
 @dataclass(frozen=True)
 class Comparison:
-    """Ein einzelner Paarvergleich: Richtung plus Intensität."""
+    """Ein einzelner Paarvergleich: Richtung plus Intensität, auf Wunsch mit
+    Begründung des Modells (nur wenn der Prompt sie verlangt hat)."""
 
     a: str
     b: str
     preference: str
     intensity: int
+    justification: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Ohne Begründung wie bisher: kein leeres Feld in den Ergebnissen."""
+        return {k: v for k, v in asdict(self).items() if k != "justification" or v is not None}
 
 
 @dataclass
@@ -111,7 +117,7 @@ class Response:
             "position": self.position,
             "sequence": list(self.sequence) if self.sequence is not None else None,
             "valid": self.valid,
-            "comparisons": [asdict(c) for c in self.comparisons],
+            "comparisons": [c.to_dict() for c in self.comparisons],
             "errors": list(self.errors),
             "raw": self.raw,
         }
@@ -128,13 +134,15 @@ def strip_code_fence(text: str) -> str:
 
 
 def parse_response(
-    raw: str, expected_pairs: Sequence[tuple[str, str]]
+    raw: str, expected_pairs: Sequence[tuple[str, str]], justification: bool = False
 ) -> tuple[list[Comparison], list[str]]:
     """Parst und validiert eine Rohantwort streng.
 
     Rückgabe: (Vergleiche, Fehler). Fehlerhafte Vergleiche werden nicht
     repariert und nicht übernommen; der Rohtext bleibt in der Response
     erhalten, damit später nachvollziehbar ist, was das Modell geliefert hat.
+    justification=True: jeder Vergleich braucht eine nicht leere Begründung.
+    Ohne die Option wird ein solches Feld wie bisher nicht übernommen.
     """
     text = strip_code_fence(raw or "").strip()
     if not text:
@@ -160,7 +168,7 @@ def parse_response(
 
     comparisons: list[Comparison] = []
     for index, (item, pair) in enumerate(zip(items, expected_pairs), start=1):
-        comparison, item_errors = _parse_item(item, pair, index)
+        comparison, item_errors = _parse_item(item, pair, index, justification)
         errors.extend(item_errors)
         if comparison is not None:
             comparisons.append(comparison)
@@ -169,7 +177,7 @@ def parse_response(
 
 
 def _parse_item(
-    item: Any, pair: tuple[str, str], index: int
+    item: Any, pair: tuple[str, str], index: int, justification: bool = False
 ) -> tuple[Optional[Comparison], list[str]]:
     left, right = pair
     if not isinstance(item, dict):
@@ -207,6 +215,13 @@ def _parse_item(
             f"{MIN_INTENSITY}-{MAX_INTENSITY}"
         )
 
+    begruendung = item.get("justification")
+    if justification and (not isinstance(begruendung, str) or not begruendung.strip()):
+        errors.append(f'Vergleich {index}: Feld "justification" fehlt oder ist leer')
+
     if errors:
         return None, errors
-    return Comparison(a=left, b=right, preference=preference, intensity=intensity), []
+    return Comparison(
+        a=left, b=right, preference=preference, intensity=intensity,
+        justification=begruendung.strip() if justification else None,
+    ), []

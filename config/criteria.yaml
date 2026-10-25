@@ -5,9 +5,14 @@
 # WICHTIG: Der Wortlaut muss exakt dem entsprechen, was die Probanden im
 # Fragebogen gesehen haben. Keine Umschrift von Umlauten.
 
+# assignment_code: Code desselben Kriteriums im Katalog der Zuordnung
+# (criteria_wang2004.yaml). Wird nicht in den Prompt gesetzt; damit bildet
+# prompt_builder.with_gate1() die Aussagen aus dem Output von Gate 1.
+
 criteria:
   - id: liefertreue
     name: Liefertreue
+    assignment_code: DR
     description: >-
       Wie zuverlässig der Lieferant die vereinbarte Menge und Qualität zum
       zugesagten Zeitpunkt liefert. Dazu gehören insbesondere die Einhaltung
@@ -16,6 +21,7 @@ criteria:
 
   - id: flexibilitaet
     name: Flexibilität
+    assignment_code: FR
     description: >-
       Wie schnell und in welchem Umfang der Lieferant auf Veränderungen
       reagieren kann. Dazu gehören insbesondere die Reaktion auf ungeplante
@@ -24,6 +30,7 @@ criteria:
 
   - id: kosten
     name: Kosten
+    assignment_code: CT
     description: >-
       Die gesamte wirtschaftliche Belastung, die durch die Zusammenarbeit mit
       dem Lieferanten entsteht. Dazu gehören beispielsweise Bestell-,
