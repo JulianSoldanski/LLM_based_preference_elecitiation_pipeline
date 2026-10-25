@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; --soft: #f5f5f7; --accent: #0a66c2;
+    --ok: #1a7f37; --ok-bg: #e8f5ec; --bad: #b42318; --bad-bg: #fdecea; --edit: #8a5a00; --edit-bg: #fff4dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c30; --soft: #1f1f22; --accent: #5aa9ff;
+      --ok: #5cc87a; --ok-bg: #173222; --bad: #ff7b72; --bad-bg: #3a1a1a; --edit: #f0b44c; --edit-bg: #33280f;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .muted { color: var(--muted); }
+  .bad-text { color: var(--bad); }
+
+  form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 20px; }
+  input, select, button, textarea { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  button { cursor: pointer; }
+  #model { width: 220px; }
+  #runs, #pause { width: 64px; }
+  button.primaer { background: var(--accent); border-color: var(--accent); color: #fff; padding: 6px 18px; }
+  button.aktiv { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 56px; resize: vertical; }
+
+  .schritte { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 20px; font-size: 13px; }
+  .schritt { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .schritt.aktiv { border-color: var(--accent); color: var(--accent); }
+  .schritt.fertig { color: var(--fg); }
+
+  .statuszeile { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .laeufe button, .faelle button { padding: 2px 10px; font-size: 13px; }
+
+  .fokus { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; min-height: 48px; }
+  .fokus.laeuft { border-color: var(--accent); }
+  .fokus .kopf { font-weight: 600; margin-bottom: 4px; }
+  .zeile { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  code { font: 12px ui-monospace, monospace; background: var(--soft); padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+
+  .spalten { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .spalte { background: var(--soft); border-radius: 8px; padding: 10px; min-height: 120px; border: 2px solid transparent; }
+  .spalte.ziel { border-color: var(--accent); }
+  .spalte h2 { font-size: 13px; margin: 0 0 8px; }
+  .spalte h2 span { font-weight: 400; color: var(--muted); }
+  .spalte h2 .leer { color: var(--bad); font-weight: 600; }
+  .spalte.jetzt { border-color: var(--accent); }
+  .spalte ul { margin: 0 0 10px; padding-left: 18px; font-size: 12px; }
+  .spalte table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .spalte td { padding: 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .schritt[data-ansicht] { cursor: pointer; }
+  .chip { display: block; box-sizing: border-box; cursor: pointer; margin-bottom: 6px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 12px; }
+  .chip[draggable="true"] { cursor: grab; }
+  .chip b { font-size: 13px; }
+  .chip.ok { background: var(--ok-bg); border-color: transparent; color: var(--ok); }
+  .chip.bad { background: var(--bad-bg); border-color: transparent; color: var(--bad); }
+  .chip.offen { border-style: dashed; }
+  .chip.verschoben { background: var(--edit-bg); border-color: transparent; color: var(--edit); }
+  .chip.geloescht { opacity: .6; text-decoration: line-through; }
+  .chip.gewaehlt { outline: 2px solid var(--accent); }
+  .chip.jetzt { border-color: var(--accent); animation: puls 1s ease-in-out infinite; }
+  .chip.neu { animation: rein .5s ease-out; }
+  @keyframes puls { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } }
+  @keyframes rein { from { opacity: 0; transform: translateY(-6px); } }
+
+  .detail, .entscheidung { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 16px; }
+  .detail p { margin: 0 0 10px; white-space: pre-wrap; }
+  .legende { font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pipeline</h1>
+
+  <form id="form">
+    <select id="provider"><option>openai</option><option>anthropic</option><option>mistral</option></select>
+    <input id="model" value="gpt-4o-2024-08-06" placeholder="Modell-ID" required>
+    <label class="muted">Läufe <input id="runs" type="number" min="1" value="1"></label>
+    <label class="muted">Pause <input id="pause" type="number" min="0" step="0.5" value="2"> s</label>
+    <button class="primaer" id="start">Start</button>
+    <span id="fehler" class="bad-text"></span>
+  </form>
+
+  <div class="schritte" id="schritte"></div>
+  <div class="statuszeile"><span id="statustext" class="muted"></span><span class="laeufe" id="laeufe"></span></div>
+  <div class="fokus" id="fokus"></div>
+  <div class="spalten" id="spalten"></div>
+  <p class="legende muted" id="legende"></p>
+  <div id="entscheidung"></div>
+  <div id="detail"></div>
+</main>
+<script>
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const speicher = { get: (k) => { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+                     set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+  let basis, st = { running: false, records: [] };
+  let angezeigt = null;      // null = dem laufenden Durchlauf folgen
+  let gewaehlt = null;       // angeklickte Karte (passage_id)
+  let gesehen = new Set();   // schon gezeichnete Karten, für die Einblend-Animation
+  let timer = null;
+  let fall = null;           // in Gate 1 geöffneter Fall
+  let entwurf = {};          // Gate 1: { fall: { passage_id: {action, new_criterion, reason, timestamp} } }
+  let entscheidungsgrund = "";
+  let ansicht = null;        // "zuordnung" oder "paarvergleich"; null = automatisch
+
+  async function api(pfad, body) {
+    const antwort = await fetch(pfad, body ? { method: "POST", body: JSON.stringify(body) } : undefined);
+    const daten = await antwort.json();
+    if (!antwort.ok) throw new Error(daten.error || antwort.statusText);
+    return daten;
+  }
+  function fehler(e) { $("#fehler").textContent = e ? e.message ?? e : ""; }
+
+  const passage = (pid) => basis.passages.find((p) => p.passage_id === pid);
+  const herkunft = (p) => (p.case ? `${p.case.replace(/^Fall \d+: /, "")} · ${p.statement}` : "");
+  const ergebnis = (r) => (r.status !== "ok" ? "failed" : r.criteria.join(", ") || "none");
+  const codes = () => basis.criteria.map((c) => c.id);
+
+  // ---------------------------------------------------------------- Gate 1
+
+  const gateModus = () => !st.running && !!st.result && !st.error;
+  const gateRun = () => st.gate1?.run ?? angezeigt ?? st.run ?? 1;
+  const faelle = () => [...new Set(basis.passages.map((p) => p.doc_id))]
+    .filter((d) => st.records.some((r) => r.run === gateRun() && r.doc_id === d));
+  const fallFertig = (d) => st.gate1?.cases?.[d];
+  const recordsVon = (d) => st.records.filter((r) => r.run === gateRun() && r.doc_id === d).sort((a, b) => a.position - b.position);
+  // Wie gate1.assignments_from_records: failed kommt als "none" ins Gate
+  const agent = (r) => (r.status === "ok" ? r.criteria[0] ?? "none" : "none");
+
+  function zustand(d, r) {
+    const fertig = fallFertig(d)?.passages?.[r.passage_id];
+    if (fertig) return { action: fertig.action, ziel: fertig.action === "delete" ? "geloescht" : fertig.criterion ?? agent(r), reason: fertig.reason };
+    const e = entwurf[d]?.[r.passage_id];
+    if (!e) return { action: null, ziel: agent(r), reason: "" };
+    return { ...e, ziel: e.action === "delete" ? "geloescht" : e.action === "reassign" ? e.new_criterion : agent(r) };
+  }
+
+  function setzen(pid, action, new_criterion = null) {
+    if (!fall || fallFertig(fall)) return;
+    const r = recordsVon(fall).find((x) => x.passage_id === pid);
+    if (action === "reassign" && new_criterion === agent(r)) action = "confirm";
+    const alt = entwurf[fall]?.[pid] ?? {};
+    (entwurf[fall] ??= {})[pid] = { action, new_criterion: action === "reassign" ? new_criterion : null,
+      reason: alt.reason ?? "", timestamp: new Date().toISOString() };
+    zeichnen();
+  }
+
+  function pruefen(d) {
+    const rs = recordsVon(d);
+    const zust = rs.map((r) => [r, zustand(d, r)]);
+    const offen = zust.filter(([, z]) => !z.action).map(([r]) => r.passage_id);
+    const ohneGrund = zust.filter(([, z]) => (z.action === "delete" || z.action === "reassign") && !z.reason.trim()).map(([r]) => r.passage_id);
+    const belegt = new Set(zust.map(([, z]) => z.ziel));
+    const ohneEvidenz = codes().filter((c) => !belegt.has(c));
+    return { offen, ohneGrund, ohneEvidenz, anzahl: rs.length };
+  }
+
+  async function oeffnen(d) {
+    try {
+      st = await api("/api/gate1/open", { run: gateRun(), case_id: d });
+      fall = d; gewaehlt = null; fehler();
+    } catch (e) { fehler(e); }
+    zeichnen();
+  }
+
+  async function abschliessen(decision) {
+    const reviewer = $("#reviewer").value.trim();
+    if (!reviewer) return fehler("Bitte zuerst ein Kürzel als Prüfer eintragen.");
+    speicher.set("reviewer", reviewer);
+    if (!confirm(`Fall ${fall} mit „${decision}“ abschließen? Danach ist nichts mehr änderbar.`)) return;
+    const actions = Object.entries(entwurf[fall] ?? {}).filter(([, e]) => e.action).map(([passage_id, e]) => ({ passage_id, ...e }));
+    try {
+      st = await api("/api/gate1/close", { run: gateRun(), case_id: fall, reviewer, decision,
+        decision_reason: entscheidungsgrund, actions });
+      fehler();
+      entscheidungsgrund = "";
+      const naechster = faelle().find((d) => !fallFertig(d));
+      gewaehlt = null;
+      if (naechster) return oeffnen(naechster);
+    } catch (e) { fehler(e); }
+    zeichnen();
+  }
+
+  // ---------------------------------------------------------------- Zeichnen
+
+  function karte(pid, code, klasse, ziehbar = false, zusatz = "") {
+    const key = `${gateModus() ? "g" : angezeigt ?? st.run}|${pid}|${code}`;
+    const neu = !gesehen.has(key) && code !== "offen";
+    gesehen.add(key);
+    const p = passage(pid);
+    return `<div class="chip ${klasse} ${neu ? "neu" : ""} ${gewaehlt === pid ? "gewaehlt" : ""}" data-pid="${esc(pid)}" draggable="${ziehbar}">
+      <b>${esc(pid)}</b>${zusatz} <span class="muted">Pos. ${p.position}</span><br><span>${esc(herkunft(p))}</span></div>`;
+  }
+
+  function spaltenLauf() {
+    const run = angezeigt ?? st.run ?? 1;
+    const fertig = new Map(st.records.filter((r) => r.run === run).map((r) => [r.passage_id, r]));
+    const spalten = [{ code: "offen", titel: "Offen", karten: [] }]
+      .concat(basis.criteria.map((c) => ({ code: c.id, titel: `${c.id} <span>${esc(c.name)}</span>`, karten: [] })))
+      .concat([{ code: "none", titel: "none <span>kein Kriterium</span>", karten: [] }]);
+    const failed = { code: "failed", titel: "Failed", karten: [] };
+    for (const p of basis.passages) {
+      const r = fertig.get(p.passage_id), erwartet = p.expected_criteria;
+      if (!r) {
+        spalten[0].karten.push(karte(p.passage_id, "offen", st.current === p.passage_id && run === st.run ? "jetzt" : ""));
+      } else if (r.status !== "ok") {
+        failed.karten.push(karte(p.passage_id, "failed", "bad"));
+      } else {
+        const code = r.criteria[0] ?? "none";
+        const klasse = erwartet == null ? "" : (code === "none" ? !erwartet.length : erwartet.includes(code)) ? "ok" : "bad";
+        spalten.find((s) => s.code === code).karten.push(karte(p.passage_id, code, klasse));
+      }
+    }
+    if (failed.karten.length) spalten.push(failed);
+    return spalten;
+  }
+
+  function spaltenGate() {
+    const spalten = basis.criteria.map((c) => ({ code: c.id, titel: `${c.id} <span>${esc(c.name)}</span>`, karten: [], pruefen: true }))
+      .concat([{ code: "none", titel: "none <span>kein Kriterium</span>", karten: [] },
+               { code: "geloescht", titel: "Gelöscht", karten: [] }]);
+    if (!fall) return [];
+    const offen = !fallFertig(fall);
+    for (const r of recordsVon(fall)) {
+      const z = zustand(fall, r);
+      const klasse = !z.action ? "offen" : z.action === "delete" ? "geloescht" : z.action === "reassign" ? "verschoben" : "";
+      const zusatz = z.action === "confirm" ? " ✓" : z.action === "reassign" ? ` <span>von ${esc(agent(r))}</span>` : "";
+      spalten.find((s) => s.code === z.ziel).karten.push(karte(r.passage_id, z.ziel, klasse, offen, zusatz));
+    }
+    return spalten;
+  }
+
+  function zeichnen() {
+    const laufend = st.running, gate = gateModus();
+    $("#start").disabled = laufend || !!st.step5?.running;
+    const alleFertig = gate && st.gate1 && faelle().every(fallFertig);
+
+    const schritte = [
+      ["Passagen", st.records.length || laufend ? "fertig" : ""],
+      ["Zuordnung", laufend ? "aktiv" : st.result ? "fertig" : ""],
+      ["Gate 1", alleFertig ? "fertig" : gate ? "aktiv" : "", "zuordnung"],
+      ["Paarvergleich", st.step5?.running ? "aktiv" : st.step5?.result ? "fertig" : "", "paarvergleich"],
+    ];
+    // Mit gestartetem Paarvergleich lässt sich über die Schrittleiste zurück zum Gate wechseln.
+    $("#schritte").innerHTML = schritte.map(([n, k, a], i) =>
+      (i ? '<span class="muted">→</span>' : "") +
+      `<span class="schritt ${k}" ${st.step5 && a ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+    if (st.step5 && ansicht !== "zuordnung") return zeichnenPaarvergleich();
+
+    const n = basis.passages.length;
+    let text = "Bereit. Anbieter und Modell wählen, dann Start.";
+    if (laufend) text = `Lauf ${st.run}/${st.runs} · ${st.records.filter((r) => r.run === st.run).length} von ${n} Passagen zugeordnet · ${esc(st.provider)} ${esc(st.model)}`;
+    else if (st.error) text = `<span class="bad-text">Abgebrochen: ${esc(st.error)}</span>`;
+    else if (st.result) {
+      const ev = st.evaluation || [];
+      const mittel = ev.length ? (ev.reduce((s, e) => s + e.exact_match, 0) / ev.length).toFixed(2) : null;
+      text = `Zuordnung fertig · ${st.runs} Lauf/Läufe${mittel && !st.gate1 ? ` · Exact Match Ø ${mittel}` : ""} · ${esc(st.result)}`;
+    }
+    $("#statustext").innerHTML = text;
+    const runs = [...new Set(st.records.map((r) => r.run))];
+    const run = gate ? gateRun() : angezeigt ?? st.run ?? 1;
+    $("#laeufe").innerHTML = runs.length > 1 && !st.gate1
+      ? runs.map((r) => `<button class="${r === run ? "aktiv" : ""}" data-run="${r}">Lauf ${r}</button>`).join(" ") : "";
+
+    // Fokus
+    const fokus = $("#fokus");
+    fokus.classList.toggle("laeuft", !!st.current);
+    const letzte = st.records[st.records.length - 1];
+    if (gate && !st.gate1) {
+      fokus.innerHTML = `<div class="kopf">Gate 1: Zuordnung prüfen</div>
+        <span class="muted">Ein Mensch prüft je Fall die Zuordnung von Lauf ${run}. Die Zeit läuft ab dem Öffnen eines Falls.</span>
+        <div class="zeile"><button class="primaer" id="gatestart">Gate 1 starten (Lauf ${run})</button></div>`;
+    } else if (gate) {
+      const tabs = faelle().map((d) => {
+        const f = fallFertig(d);
+        const zeichen = f ? (f.decision === "continue" ? " ✓" : " ■") : "";
+        return `<button class="${d === fall ? "aktiv" : ""}" data-fall="${esc(d)}">${esc(d)}${zeichen}</button>`;
+      }).join(" ");
+      const fertigeDateien = faelle().filter((d) => fallFertig(d)?.decision === "continue").map((d) => fallFertig(d).file);
+      fokus.innerHTML = `<div class="kopf">Gate 1 · Lauf ${gateRun()}</div>
+        <div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
+        <span class="faelle">${tabs}</span></div>
+        ${!alleFertig ? "" : fertigeDateien.length ? `
+          <div class="zeile"><b>Weiter mit Schritt 5: Paarvergleich</b>
+            <span class="muted">${fertigeDateien.length} freigegebene Fälle · Anbieter, Modell und Pause wie oben</span></div>
+          <div class="zeile">
+            <label class="muted">Bedingung <select id="bedingung"><option>stateless</option><option>history</option></select></label>
+            <label class="muted">Läufe <input id="runs5" type="number" min="1" value="1" style="width:64px"></label>
+            <label class="muted" title="Das Modell begründet jeden Paarvergleich. Ändert den Prompt; Ergebnis in eigener Datei."><input id="begruendung5" type="checkbox"> mit Begründung</label>
+            <button class="primaer" id="paarvergleich" ${st.step5?.running ? "disabled" : ""}>Paarvergleich starten</button></div>`
+          : '<div class="zeile">Alle Fälle abgeschlossen. Kein Fall hat Gate 1 mit continue verlassen, an Schritt 5 geht nichts.</div>'}`;
+    } else if (st.current && run === st.run) {
+      const p = passage(st.current);
+      fokus.innerHTML = `<div class="kopf">Wird zugeordnet: ${esc(p.passage_id)} <span class="muted">${esc(herkunft(p))}</span></div>${esc(p.text)}`;
+    } else if (letzte) {
+      fokus.innerHTML = `<div class="kopf">Zuletzt: ${esc(letzte.passage_id)} → ${esc(ergebnis(letzte))}</div><span class="muted">${esc(letzte.justification ?? letzte.errors.join("; "))}</span>`;
+    } else {
+      fokus.innerHTML = `<span class="muted">${n} Passagen warten · Katalog ${esc(basis.criteria_file)}</span>`;
+    }
+
+    // Spalten
+    const inGate = gate && st.gate1;
+    const spalten = inGate ? spaltenGate() : spaltenLauf();
+    $("#spalten").innerHTML = spalten.map((s) => {
+      const leer = s.pruefen && !s.karten.length ? ' <span class="leer">KEINE EVIDENZ</span>' : "";
+      return `<div class="spalte" data-code="${s.code}"><h2>${s.titel} <span>${s.karten.length || ""}</span>${leer}</h2>${s.karten.join("")}</div>`;
+    }).join("");
+    $("#legende").textContent = inGate
+      ? "Karte anklicken für Text und Aktion, oder in eine andere Spalte ziehen · gestrichelt: noch keine Aktion · ✓ bestätigt · gelb: neu zugeordnet · Erwartete Kriterien sind im Gate ausgeblendet."
+      : "Grün: Zuordnung stimmt mit expected_criteria überein · Rot: abweichend · Karte anklicken für die Begründung";
+
+    entscheidung();
+    detail();
+  }
+
+  function entscheidung() {
+    if (!(gateModus() && st.gate1 && fall)) return ($("#entscheidung").innerHTML = "");
+    const f = fallFertig(fall);
+    if (f) {
+      const c = f.counts;
+      $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Fall ${esc(fall)} abgeschlossen: ${esc(f.decision)}</b> → ${esc(f.status)}
+        <span class="muted">· ${c.confirmed} bestätigt, ${c.reassigned} neu zugeordnet, ${c.deleted} gelöscht · ${esc(f.file)} (schreibgeschützt)</span></div>`;
+      return;
+    }
+    const p = pruefen(fall);
+    const hinweise = [
+      `${p.anzahl - p.offen.length} von ${p.anzahl} Passagen bearbeitet`,
+      p.ohneGrund.length ? `<span class="bad-text">Begründung fehlt: ${p.ohneGrund.join(", ")}</span>` : "",
+      p.ohneEvidenz.length ? `<span class="bad-text">Kriterien ohne Evidenz: ${p.ohneEvidenz.join(", ")}</span>` : "",
+    ].filter(Boolean).join(" · ");
+    const weiterGeht = !p.offen.length && !p.ohneGrund.length && !p.ohneEvidenz.length;
+    $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Entscheidung für Fall ${esc(fall)}</b><br><span class="muted">${hinweise}</span>
+      <div class="zeile">${p.offen.length ? `<button id="restbestaetigen">Übrige ${p.offen.length} bestätigen</button>` : ""}
+        <input id="entscheidungsgrund" value="${esc(entscheidungsgrund)}" placeholder="Begründung zur Entscheidung (optional)" style="flex:1; min-width:200px">
+        <button class="primaer" data-decision="continue" ${weiterGeht ? "" : "disabled"} title="${weiterGeht ? "" : "Erst jede Passage bearbeiten, alle Begründungen eintragen und jedes Kriterium belegen"}">continue</button>
+        <button data-decision="need_more_input" ${p.ohneGrund.length ? "disabled" : ""}>need_more_input</button></div></div>`;
+  }
+
+  function detail() {
+    if (!gewaehlt) return ($("#detail").innerHTML = "");
+    const pid = gewaehlt, p = passage(pid);
+    const r = st.records.find((x) => x.run === (gateModus() ? gateRun() : angezeigt ?? st.run) && x.passage_id === pid);
+    if (!r) return ($("#detail").innerHTML = `<div class="detail"><p><b>${esc(pid)}</b></p><p>${esc(p.text)}</p><p class="muted">Noch nicht zugeordnet.</p></div>`);
+    const kopf = `<p><b>${esc(pid)}</b> <span class="muted">${esc(herkunft(p))} · Dokument ${esc(p.doc_id)}, Position ${p.position}</span></p><p>${esc(p.text)}</p>`;
+    const begruendung = `<p><b>Agent:</b> ${esc(gateModus() && st.gate1 ? agent(r) : ergebnis(r))}<br><span class="muted">${esc(r.justification ?? "Zuordnung fehlgeschlagen: " + r.errors.join("; "))}</span></p>`;
+
+    if (!(gateModus() && st.gate1)) {
+      const erwartet = p.expected_criteria == null ? "–" : p.expected_criteria.join(", ") || "none";
+      $("#detail").innerHTML = `<div class="detail">${kopf}${begruendung}<p><b>Erwartet:</b> ${esc(erwartet)}</p></div>`;
+      return;
+    }
+    const z = zustand(r.doc_id, r), gesperrt = !!fallFertig(r.doc_id) || r.doc_id !== fall;
+    const ziele = [...codes(), "none"].filter((c) => c !== agent(r));
+    $("#detail").innerHTML = `<div class="detail">${kopf}${begruendung}
+      <div class="zeile">
+        <button data-aktion="confirm" class="${z.action === "confirm" ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>Bestätigen</button>
+        <button data-aktion="delete" class="${z.action === "delete" ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>Löschen</button>
+        <span>Neu zuordnen:</span>${ziele.map((c) =>
+          `<button data-aktion="reassign" data-ziel="${c}" class="${z.action === "reassign" && z.ziel === c ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>${c}</button>`).join("")}
+      </div>
+      <p style="margin-top:10px"><b>Begründung</b> <span class="muted">(Pflicht bei Löschen und Neu zuordnen)</span><br>
+        <textarea id="grund" ${gesperrt ? "disabled" : ""}>${esc(z.reason)}</textarea></p></div>`;
+  }
+
+  // -------------------------------------------------- Schritt 5: Paarvergleich
+
+  async function paarvergleichStarten() {
+    fehler();
+    try {
+      st = await api("/api/step5/start", { provider: $("#provider").value, model: $("#model").value,
+        pause: Number($("#pause").value), runs: Number($("#runs5").value), condition: $("#bedingung").value,
+        justification: $("#begruendung5").checked });
+      ansicht = "paarvergleich";
+      abfragen();
+    } catch (e) { fehler(e); }
+  }
+
+  function zeichnenPaarvergleich() {
+    const s5 = st.step5, run = s5.run, name = (id) => s5.names[id] ?? id;
+    const urteil = (c) => (c.preference in s5.names ? `${name(c.preference)} ${c.intensity}` : c.preference);
+    const fertigImLauf = s5.responses.filter((r) => r.run === run).length;
+    let text = `Paarvergleich · ${esc(s5.condition)}${s5.justification ? " · mit Begründung" : ""} · Lauf ${run}/${s5.runs} · ${fertigImLauf} von ${s5.cases.length} Fällen · ${esc(s5.provider)} ${esc(s5.model)}`;
+    if (s5.error) text = `<span class="bad-text">Paarvergleich abgebrochen: ${esc(s5.error)}</span>`;
+    else if (s5.result) text = `Paarvergleich fertig · ${s5.runs} Lauf/Läufe · ${esc(s5.result)}`;
+    $("#statustext").innerHTML = text;
+    $("#laeufe").innerHTML = "";
+
+    const fokus = $("#fokus"), aktuell = s5.cases.find((c) => c.id === s5.current);
+    fokus.classList.toggle("laeuft", !!aktuell);
+    fokus.innerHTML = aktuell
+      ? `<div class="kopf">Wird verglichen: ${esc(aktuell.title)}</div><span class="muted">Das Modell liest die Aussagen unten und füllt die Paarvergleiche aus.</span>`
+      : s5.result ? `<div class="kopf">Paarvergleich abgeschlossen</div><span class="muted">Rohurteile in ${esc(s5.result)}. Die Gewichtung folgt in einem eigenen Auswertungsschritt.</span>`
+      : `<span class="muted">Startet …</span>`;
+
+    $("#spalten").innerHTML = s5.cases.map((c) => {
+      const alle = s5.responses.filter((r) => r.case_id === c.id);
+      const r = alle.find((x) => x.run === run);
+      const aussagen = `<ul>${c.statements.map(([n, t]) => `<li><b>${esc(n)}:</b> ${esc(t)}</li>`).join("")}</ul>`;
+      let urteile = `<p class="muted">${s5.current === c.id ? "wird verglichen …" : "wartet"}</p>`;
+      if (r && !r.valid) urteile = `<p class="bad-text">Ungültig: ${esc(r.errors.join("; "))}</p>`;
+      else if (r) {
+        urteile = `<table>${r.comparisons.map((cmp) => {
+          // Über alle Läufe: häufigstes Urteil je Paar
+          const zaehler = {};
+          alle.filter((x) => x.valid).forEach((x) => {
+            const u = urteil(x.comparisons.find((y) => y.a === cmp.a && y.b === cmp.b) ?? {});
+            zaehler[u] = (zaehler[u] || 0) + 1;
+          });
+          const top = Object.entries(zaehler).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([u, k]) => `${esc(u)} (${k})`).join(" · ");
+          const grund = cmp.justification ? `<tr><td colspan="2" class="muted" style="border-top:none; padding-top:0">${esc(cmp.justification)}</td></tr>` : "";
+          return `<tr><td>${esc(name(cmp.a))} vs. ${esc(name(cmp.b))}</td><td><b>${esc(urteil(cmp))}</b>${s5.runs > 1 ? `<br><span class="muted">${top}</span>` : ""}</td></tr>${grund}`;
+        }).join("")}</table>`;
+      }
+      return `<div class="spalte ${s5.current === c.id ? "jetzt" : ""}"><h2>${esc(c.title)}</h2>${aussagen}${urteile}</div>`;
+    }).join("");
+    $("#legende").textContent = "Fett: Urteil im aktuellen Lauf (bevorzugtes Kriterium und Intensität) · bei mehreren Läufen darunter die häufigsten Urteile mit Anzahl"
+      + (s5.justification ? " · grau darunter: Begründung des Modells im aktuellen Lauf." : ".");
+    $("#entscheidung").innerHTML = "";
+    $("#detail").innerHTML = "";
+  }
+
+  // ------------------------------------------------------------------ Abfrage
+
+  async function abfragen() {
+    try {
+      st = await api("/api/status");
+    } catch (e) { fehler(e); }
+    if (gateModus() && st.gate1 && !fall) fall = faelle().find((d) => !fallFertig(d)) ?? faelle()[0];
+    zeichnen();
+    clearTimeout(timer);
+    if (st.running || st.step5?.running) timer = setTimeout(abfragen, 500);
+  }
+
+  // ----------------------------------------------------------------- Ereignisse
+
+  $("#form").onsubmit = async (e) => {
+    e.preventDefault();
+    const offen = gateModus() && st.gate1 && faelle().some((d) => !fallFertig(d));
+    if (offen && !confirm("Gate 1 ist nicht für alle Fälle abgeschlossen. Trotzdem einen neuen Lauf starten?")) return;
+    fehler();
+    try {
+      st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value, runs: Number($("#runs").value), pause: Number($("#pause").value) });
+      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
+      abfragen();
+    } catch (err) { fehler(err); }
+  };
+
+  $("#fokus").onclick = (e) => {
+    if (e.target.id === "gatestart") return oeffnen(faelle()[0]);
+    if (e.target.id === "paarvergleich") return paarvergleichStarten();
+    const d = e.target.dataset?.fall;
+    if (d) fallFertig(d) ? ((fall = d), (gewaehlt = null), zeichnen()) : oeffnen(d);
+  };
+  $("#fokus").onchange = (e) => { if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim()); };
+
+  $("#spalten").onclick = (e) => {
+    const chip = e.target.closest(".chip");
+    if (chip) { gewaehlt = chip.dataset.pid; zeichnen(); }
+  };
+  $("#spalten").ondragstart = (e) => {
+    const chip = e.target.closest(".chip");
+    if (chip) e.dataTransfer.setData("text/plain", chip.dataset.pid);
+  };
+  $("#spalten").ondragover = (e) => {
+    const spalte = e.target.closest(".spalte");
+    if (!spalte || !fall || fallFertig(fall)) return;
+    e.preventDefault();
+    document.querySelectorAll(".spalte.ziel").forEach((s) => s !== spalte && s.classList.remove("ziel"));
+    spalte.classList.add("ziel");
+  };
+  $("#spalten").ondragleave = (e) => {
+    const spalte = e.target.closest(".spalte");
+    if (spalte && !spalte.contains(e.relatedTarget)) spalte.classList.remove("ziel");
+  };
+  $("#spalten").ondrop = (e) => {
+    e.preventDefault();
+    const spalte = e.target.closest(".spalte"), pid = e.dataTransfer.getData("text/plain");
+    if (!spalte || !pid) return;
+    const code = spalte.dataset.code;
+    gewaehlt = pid;
+    if (code === "geloescht") setzen(pid, "delete");
+    else setzen(pid, "reassign", code);  // zurück in die Ursprungsspalte = confirm
+  };
+
+  $("#detail").onclick = (e) => {
+    const b = e.target.closest("[data-aktion]");
+    if (b && !b.disabled) setzen(gewaehlt, b.dataset.aktion, b.dataset.ziel ?? null);
+  };
+  $("#detail").oninput = (e) => {
+    if (e.target.id !== "grund" || !fall) return;
+    const r = recordsVon(fall).find((x) => x.passage_id === gewaehlt);
+    if (!entwurf[fall]?.[gewaehlt]) (entwurf[fall] ??= {})[gewaehlt] = { action: null, new_criterion: null, reason: "", timestamp: null };
+    entwurf[fall][gewaehlt].reason = e.target.value;
+    if (r) entscheidung();
+  };
+
+  $("#entscheidung").oninput = (e) => { if (e.target.id === "entscheidungsgrund") entscheidungsgrund = e.target.value; };
+  $("#entscheidung").onclick = (e) => {
+    if (e.target.id === "restbestaetigen") {
+      for (const pid of pruefen(fall).offen) setzen(pid, "confirm");
+      return;
+    }
+    const d = e.target.dataset?.decision;
+    if (d && !e.target.disabled) abschliessen(d);
+  };
+
+  $("#schritte").onclick = (e) => {
+    const a = e.target.closest("[data-ansicht]")?.dataset.ansicht;
+    if (a) { ansicht = a; zeichnen(); }
+  };
+  $("#laeufe").onclick = (e) => {
+    const r = e.target.dataset.run;
+    if (r) { angezeigt = Number(r) === st.run && st.running ? null : Number(r); zeichnen(); }
+  };
+
+  (async () => {
+    try {
+      basis = await api("/api/basis");
+      abfragen();
+    } catch (e) { fehler(e); }
+  })();
+</script>
+</body>
+</html>
