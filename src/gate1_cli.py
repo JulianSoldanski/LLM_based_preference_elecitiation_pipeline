@@ -15,6 +15,10 @@ Das GateDecision-Ereignis trägt den SHA-256 der Ergebnisdatei. Schritt 5 liest
 ausschließlich über load_validated(), das Hash und Entscheidung prüft. Wer die
 Datei später ändert oder Gate 1 für denselben Fall erneut durchführt, bringt
 Schritt 5 damit zum Abbruch.
+
+Geschrieben wird über ledger.einfrieren(): erst das Log, dann die Datei. Ein
+Fall gilt nur als abgeschlossen, wenn beides zusammenpasst; eine Datei ohne
+Log-Eintrag wird als unvollständig gemeldet und nie still übernommen.
 """
 
 from __future__ import annotations
@@ -29,8 +33,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import ledger
 from assignment import NONE, load_criteria, sha256
-from experiment import _schreibe_json
 from gate1 import (
     CONFIRM,
     CONTINUE,
@@ -65,6 +69,12 @@ def events_pfad(result_path: Path) -> Path:
     return result_path.with_name(f"{result_path.stem}_events.jsonl")
 
 
+def relativer_pfad(pfad: Path, basis: Path) -> str:
+    """Pfad relativ zum Projekt, außerhalb (z.B. in Tests) absolut."""
+    pfad = Path(pfad).resolve()
+    return str(pfad.relative_to(basis)) if pfad.is_relative_to(basis) else str(pfad)
+
+
 def _jetzt() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -85,6 +95,7 @@ def run_gate1(
 ) -> list[Path]:
     """Führt Gate 1 für alle (oder einen) Fälle eines Laufs durch. Gibt die
     geschriebenen Ergebnisdateien zurück; schon abgeschlossene Fälle werden
+    übersprungen, unvollständig abgeschlossene gemeldet und ebenfalls
     übersprungen. Ein Abbruch (Ctrl+C/EOF) schreibt für den Fall nichts."""
     result_path = Path(result_path)
     dokument = json.loads(result_path.read_text(encoding="utf-8"))
@@ -105,8 +116,18 @@ def run_gate1(
     geschrieben = []
     for case_id, assignments in faelle.items():
         ziel = gate_pfad(result_path, run, case_id)
-        if ziel.exists():
+        stand = abschlussstand(result_path, run, case_id)
+        if stand == ledger.NACHHOLBAR:
+            ledger.nachholen(ziel, events_pfad(result_path), "GateDecision", GATE)
+            ausgabe(f"Fall {case_id}: Abschluss nachgeholt, Log und Datei passen ({ziel.name}).")
+            geschrieben.append(ziel)
+            continue
+        if stand == ledger.ABGESCHLOSSEN:
             ausgabe(f"Fall {case_id}: Gate 1 ist bereits abgeschlossen ({ziel.name}), übersprungen.")
+            continue
+        if stand != ledger.OFFEN:
+            ausgabe(f"Fall {case_id}: {ledger.beschreibung(ziel, stand)}. Nichts wird gelöscht oder "
+                    "überschrieben; bitte von Hand prüfen. Übersprungen.")
             continue
         geoeffnet = uhr()
         if auto:
@@ -119,6 +140,11 @@ def run_gate1(
         ausgabe(f"Fall {case_id}: {ergebnis.decision} → {status} · {ziel.name}")
         geschrieben.append(ziel)
     return geschrieben
+
+
+def abschlussstand(result_path: Path, run: int, case_id: str) -> str:
+    """Stand von Gate 1 für einen Fall, siehe ledger.zustand()."""
+    return ledger.zustand(gate_pfad(result_path, run, case_id), events_pfad(result_path), "GateDecision", GATE)
 
 
 def speichern(
@@ -147,22 +173,20 @@ def speichern(
         "gate_closed": geschlossen,
         **{k: v for k, v in asdict(ergebnis).items() if k != "events"},
     }
-    _schreibe_json(ziel, inhalt)
-    ziel.chmod(0o444)  # eingefroren
-    pruefsumme = sha256(ziel)
-
-    with events_pfad(result_path).open("a", encoding="utf-8") as log:
-        for event in ergebnis.events:
-            zeile = {
-                "event_id": uuid.uuid4().hex,
-                "timestamp": zeiten.get(event["passage_id"], geschlossen),
-                "run_id": run_id,
-                "case_id": case_id,
-                **event,
-            }
-            if event["event_type"] == "GateDecision":
-                zeile.update(result_file=ziel.name, result_sha256=pruefsumme)
-            log.write(json.dumps(zeile, ensure_ascii=False) + "\n")
+    zeilen = [
+        {
+            "event_id": uuid.uuid4().hex,
+            "timestamp": zeiten.get(event["passage_id"], geschlossen),
+            "run_id": run_id,
+            "case_id": case_id,
+            **event,
+        }
+        for event in ergebnis.events
+    ]
+    try:
+        ledger.einfrieren(ziel, inhalt, events_pfad(result_path), zeilen, "GateDecision")
+    except ledger.LedgerError as exc:
+        raise GateError(str(exc)) from None
 
 
 def load_validated(gate_path: Path) -> dict[str, Any]:
@@ -171,32 +195,28 @@ def load_validated(gate_path: Path) -> dict[str, Any]:
     gate_path = Path(gate_path)
     inhalt = json.loads(gate_path.read_text(encoding="utf-8"))
     log = gate_path.with_name(f"{inhalt['run_id']}_events.jsonl")
-    if not log.is_file():
-        raise GateError(f"Ereignislog fehlt: {log.name}")
-    entscheidungen = [
-        e
-        for e in map(json.loads, log.read_text(encoding="utf-8").splitlines())
-        if e["event_type"] == "GateDecision" and e["gate"] == GATE and e.get("result_file") == gate_path.name
-    ]
-    if len(entscheidungen) != 1:
-        raise GateError(f"{gate_path.name}: {len(entscheidungen)} GateDecision-Einträge im Log, erwartet genau einer")
-    if entscheidungen[0]["result_sha256"] != sha256(gate_path):
-        raise GateError(f"{gate_path.name} wurde nach Gate 1 verändert (SHA-256 passt nicht zum Log)")
+    try:
+        inhalt = ledger.pruefe(gate_path, log, "GateDecision", GATE)
+    except ledger.LedgerError as exc:
+        raise GateError(str(exc).replace("nach dem Abschluss", "nach Gate 1")) from None
     if inhalt["decision"] != CONTINUE:
         raise GateError(f"Fall {inhalt['case_id']}: {STATUS_STOPPED}, an Schritt 5 wird nichts übergeben")
     return inhalt
 
 
 def builder_from_gate1(paths: list[Path]) -> tuple[Any, list[dict[str, str]]]:
-    """PromptBuilder für Schritt 5 aus validierten Gate-1-Dateien, dazu Name
-    und SHA-256 jeder Datei für die Metadaten des Paarvergleichs."""
-    from prompt_builder import PromptBuilder
+    """PromptBuilder für Schritt 5 aus validierten Gate-1-Dateien, dazu Name,
+    Pfad (relativ zum Projekt, falls darin) und SHA-256 jeder Datei für die
+    Metadaten des Paarvergleichs."""
+    from prompt_builder import ROOT, PromptBuilder
 
     ergebnisse = [load_validated(p) for p in paths]
     faelle = [e["case_id"] for e in ergebnisse]
     if len(set(faelle)) != len(faelle):
         raise GateError(f"Mehrere Gate-1-Dateien für denselben Fall: {faelle}")
-    quellen = [{"file": Path(p).name, "sha256": sha256(Path(p))} for p in paths]
+    quellen = [
+        {"file": Path(p).name, "sha256": sha256(Path(p)), "path": relativer_pfad(Path(p), ROOT)} for p in paths
+    ]
     return PromptBuilder.from_paths().with_gate1(ergebnisse), quellen
 
 
