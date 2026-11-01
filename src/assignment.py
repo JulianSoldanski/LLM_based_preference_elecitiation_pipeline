@@ -8,6 +8,7 @@ wiederholt; scheitert auch die, bleibt die Passage als "failed" im Ergebnis.
 
     python3 src/assignment.py --dry-run
     python3 src/assignment.py --model gpt-4o-2024-08-06 --runs 5
+    python3 src/assignment.py --model gpt-4o-2024-08-06 --case ketten   # nur ein Fall
 
 Jeder Datensatz ist eine flache Zeile je Passage und Lauf. "criteria" ist eine
 Liste mit höchstens einem Code ([] = "none"), damit Auswertung und ältere
@@ -180,11 +181,17 @@ def output_schema(codes: list[str]) -> dict[str, Any]:
     }
 
 
-def prepare(passages_path: Path, criteria_path: Path, prompt_path: Path) -> dict[str, Any]:
-    """Lädt alle Eingaben und rendert die Prompts, bevor ein Modell gerufen wird."""
+def prepare(passages_path: Path, criteria_path: Path, prompt_path: Path, doc_id: str | None = None) -> dict[str, Any]:
+    """Lädt alle Eingaben und rendert die Prompts, bevor ein Modell gerufen wird.
+    Mit doc_id nur die Passagen dieses Falls (das Artefakt bearbeitet einen Fall)."""
     criteria = load_criteria(criteria_path)
     codes = [c.id for c in criteria]
     passages = load_passages(passages_path, codes)
+    if doc_id is not None:
+        bekannt = sorted({p["doc_id"] for p in passages})
+        passages = [p for p in passages if p["doc_id"] == doc_id]
+        if not passages:
+            raise ConfigError(f"Fall {doc_id!r} hat keine Passagen in {passages_path.name}, bekannt: {bekannt}")
     system_template, user_template = load_prompt(prompt_path)
     block = "\n".join(f"- {c.id} ({c.name}): {c.description}" for c in criteria)
     return {
@@ -290,15 +297,19 @@ def run_assignment(
     temperature: float = 0.0,
     out_dir: Path = OUT_DIR,
     quiet: bool = False,
+    doc_id: str | None = None,
     progress: Callable[[int, dict[str, Any], dict[str, Any] | None], None] | None = None,
 ) -> tuple[Path, Path]:
-    """n Durchläufe über alle Passagen. Gibt (JSON-Pfad, Log-Pfad) zurück.
+    """n Durchläufe über alle Passagen, mit doc_id nur über die eines Falls.
+    Gibt (JSON-Pfad, Log-Pfad) zurück.
 
     progress(run, passage, record) wird je Passage zweimal gerufen: vor dem
     Modellaufruf mit record=None und danach mit dem fertigen Datensatz."""
-    eingabe = prepare(passages_path, criteria_path, prompt_path)
+    eingabe = prepare(passages_path, criteria_path, prompt_path, doc_id)
     start = datetime.now(timezone.utc)
     run_id = f"{start.astimezone().strftime(ZEITFORMAT_DATEI)}_{client.provider}_{model_slug(client.model_id)}"
+    if doc_id is not None:
+        run_id += f"_{doc_id}"
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path, log_path = out_dir / f"{run_id}.json", out_dir / f"{run_id}.log"
@@ -318,6 +329,7 @@ def run_assignment(
         "criteria": eingabe["codes"],
         "passages_file": passages_path.name,
         "passages_sha256": sha256(passages_path),
+        "doc_id": doc_id,
         "max_attempts": MAX_ATTEMPTS,
         "output_schema": eingabe["schema"],
     }
@@ -335,9 +347,9 @@ def run_assignment(
     logger = setup_logger(log_path, quiet)
     try:
         logger.info(
-            "Start %s | provider=%s model=%s temperature=%s runs=%d prompt=%s criteria=%s passages=%d",
+            "Start %s | provider=%s model=%s temperature=%s runs=%d prompt=%s criteria=%s case=%s passages=%d",
             meta["started"], client.provider, client.model_id, temperature, runs,
-            meta["prompt_version"], meta["criteria_file"], len(eingabe["passages"]),
+            meta["prompt_version"], meta["criteria_file"], doc_id or "alle", len(eingabe["passages"]),
         )
         logger.debug("---- SYSTEM-PROMPT ----\n%s", eingabe["system"])
         logger.debug("---- SCHEMA ----\n%s", json.dumps(eingabe["schema"], ensure_ascii=False))
@@ -431,6 +443,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=1, help="Wiederholungen über alle Passagen")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--passages", type=Path, default=PASSAGES_FILE, help="CSV mit den Passagen")
+    parser.add_argument("--case", dest="doc_id", help="Nur die Passagen dieses Falls (doc_id). Ohne Angabe alle")
     parser.add_argument("--criteria", type=Path, default=CRITERIA_FILE, help="YAML mit dem Kriterienkatalog")
     parser.add_argument("--prompt", type=Path, default=PROMPT_FILE, help="Versionierte Prompt-Vorlage")
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR, help="Zielverzeichnis")
@@ -449,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     if args.dry_run:
-        eingabe = prepare(args.passages, args.criteria, args.prompt)
+        eingabe = prepare(args.passages, args.criteria, args.prompt, args.doc_id)
         print(f"==== SYSTEM ====\n{eingabe['system']}\n")
         print(f"==== SCHEMA ====\n{json.dumps(eingabe['schema'], indent=2)}")
         for passage_id, user in eingabe["user"].items():
@@ -465,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         temperature=args.temperature,
         out_dir=args.out_dir,
         quiet=args.quiet,
+        doc_id=args.doc_id,
     )
 
     # Hier importiert, weil assignment_eval seinerseits dieses Modul importiert.
