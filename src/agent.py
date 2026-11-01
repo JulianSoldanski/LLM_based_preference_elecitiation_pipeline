@@ -8,13 +8,14 @@ Zeilen ergänzt werden können.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence, runtime_checkable
 
-from prompt_builder import ROOT, PromptBuilder
+from prompt_builder import REVISION_PROMPT, ROOT, PromptBuilder
 from schema import (
     CONDITION_HISTORY,
     CONDITION_STATELESS,
@@ -304,6 +305,29 @@ def build_client(provider: str, model: str, **kwargs: Any) -> LLMClient:
     raise ValueError(f"Unbekannter Anbieter: {provider!r}")
 
 
+@dataclass(frozen=True)
+class Revision:
+    """Ein Revisionsaufruf in Gate 2: Prompt, Rohantwort und validierte Urteile
+    nur für die zurückgegebenen Paare."""
+
+    case_id: str
+    pairs: tuple[tuple[str, str], ...]
+    system: str
+    user: str
+    raw: str
+    comparisons: tuple[Comparison, ...]
+    errors: tuple[str, ...]
+    prompt_version: str = REVISION_PROMPT.stem
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
+
+    @property
+    def prompt_sha256(self) -> str:
+        return hashlib.sha256(f"{self.system}\n\n{self.user}".encode("utf-8")).hexdigest()
+
+
 @dataclass
 class AhpAgent:
     """Beurteilt Fälle in einer der beiden Erhebungsbedingungen.
@@ -330,7 +354,7 @@ class AhpAgent:
                 case_id, run, raw="", errors=[f"Client-Fehler: {type(exc).__name__}: {exc}"]
             )
 
-        comparisons, errors = parse_response(raw, self.builder.expected_pairs(), self.builder.justification)
+        comparisons, errors = self._parse(raw, case_id)
         return self._response(case_id, run, raw=raw, comparisons=comparisons, errors=errors)
 
     def judge_sequence(
@@ -390,7 +414,7 @@ class AhpAgent:
             # repariert oder weggelassen wäre es nicht mehr der Kontext, den das
             # Modell tatsächlich gesehen hat.
             messages.append({"role": "assistant", "content": raw})
-            comparisons, errors = parse_response(raw, self.builder.expected_pairs(), self.builder.justification)
+            comparisons, errors = self._parse(raw, case_id)
             responses.append(
                 self._response(case_id, run, raw=raw, comparisons=comparisons, errors=errors, **meta)
             )
@@ -398,6 +422,33 @@ class AhpAgent:
                 on_case(case_id, responses[-1])
 
         return responses
+
+    def revise(
+        self,
+        case_id: str,
+        current: Sequence[Any],
+        pairs: Sequence[tuple[str, str]],
+        comments: dict[tuple[str, str], str] | None = None,
+    ) -> Revision:
+        """Gate 2: lässt nur `pairs` anhand der Aussagen neu beurteilen
+        (prompts/revision_v1.md). Ein Aufruf; eine Wiederholung bei ungültiger
+        Antwort übernimmt der Aufrufer. Der Prompt von Schritt 5 bleibt
+        unverändert, Gewichte und CR stehen nicht im Revisionsprompt."""
+        pairs = tuple(tuple(p) for p in pairs)
+        system, user = self.builder.build_revision(case_id, current, list(pairs), comments)
+        try:
+            raw = self.client.complete(system, user, self.temperature)
+        except Exception as exc:  # wie judge(): Netzfehler beenden nichts
+            return Revision(case_id, pairs, system, user, "", (), (f"Client-Fehler: {type(exc).__name__}: {exc}",))
+        comparisons, errors = parse_response(
+            raw, list(pairs), self.builder.justification, self.builder.evidence_ids(case_id)
+        )
+        return Revision(case_id, pairs, system, user, raw, tuple(comparisons), tuple(errors))
+
+    def _parse(self, raw: str, case_id: str) -> tuple[list[Comparison], list[str]]:
+        return parse_response(
+            raw, self.builder.expected_pairs(), self.builder.justification, self.builder.evidence_ids(case_id)
+        )
 
     def _response(
         self,

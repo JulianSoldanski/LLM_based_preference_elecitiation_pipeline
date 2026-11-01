@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
-from typing import Any, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Collection, Optional, Sequence
 
 # Antworttoken für Indifferenz. Entspricht der Option "gleich wichtig" im
 # Fragebogen: dort wird Indifferenz über die Richtungsfrage erfasst, nicht
@@ -56,6 +56,8 @@ class Case:
     component: str
     statement_order: tuple[str, ...]
     statements: dict[str, str]
+    # Nur aus Gate 1: je Kriterium die Passagen (ID, Text) in Dokumentreihenfolge.
+    passages: dict[str, tuple[tuple[str, str], ...]] = field(default_factory=dict)
 
     def ordered_statements(self) -> list[tuple[str, str]]:
         """Aussagen in der Reihenfolge, in der die Probanden sie gesehen haben."""
@@ -72,10 +74,23 @@ class Comparison:
     preference: str
     intensity: int
     justification: Optional[str] = None
+    # Belegstellen (Spec 07): Passage-IDs, auf die sich das Urteil stützt.
+    evidence: Optional[tuple[str, ...]] = None
+
+    @property
+    def no_evidence(self) -> bool:
+        """Leere Belegliste: das Urteil beruht nur auf Modellwissen (Messwert, kein Fehler)."""
+        return self.evidence is not None and not self.evidence
 
     def to_dict(self) -> dict[str, Any]:
-        """Ohne Begründung wie bisher: kein leeres Feld in den Ergebnissen."""
-        return {k: v for k, v in asdict(self).items() if k != "justification" or v is not None}
+        """Ohne Begründung und Belegstellen wie bisher: keine leeren Felder."""
+        daten = {"a": self.a, "b": self.b, "preference": self.preference, "intensity": self.intensity}
+        if self.justification is not None:
+            daten["justification"] = self.justification
+        if self.evidence is not None:
+            daten["evidence"] = list(self.evidence)
+            daten["no_evidence"] = self.no_evidence
+        return daten
 
 
 @dataclass
@@ -134,7 +149,10 @@ def strip_code_fence(text: str) -> str:
 
 
 def parse_response(
-    raw: str, expected_pairs: Sequence[tuple[str, str]], justification: bool = False
+    raw: str,
+    expected_pairs: Sequence[tuple[str, str]],
+    justification: bool = False,
+    evidence_ids: Collection[str] | None = None,
 ) -> tuple[list[Comparison], list[str]]:
     """Parst und validiert eine Rohantwort streng.
 
@@ -143,6 +161,8 @@ def parse_response(
     erhalten, damit später nachvollziehbar ist, was das Modell geliefert hat.
     justification=True: jeder Vergleich braucht eine nicht leere Begründung.
     Ohne die Option wird ein solches Feld wie bisher nicht übernommen.
+    evidence_ids: Passage-IDs im Prompt des Falls. Gesetzt verlangt jeder
+    Vergleich eine Liste "evidence" nur aus diesen IDs; leer ist erlaubt.
     """
     text = strip_code_fence(raw or "").strip()
     if not text:
@@ -168,7 +188,7 @@ def parse_response(
 
     comparisons: list[Comparison] = []
     for index, (item, pair) in enumerate(zip(items, expected_pairs), start=1):
-        comparison, item_errors = _parse_item(item, pair, index, justification)
+        comparison, item_errors = _parse_item(item, pair, index, justification, evidence_ids)
         errors.extend(item_errors)
         if comparison is not None:
             comparisons.append(comparison)
@@ -177,7 +197,11 @@ def parse_response(
 
 
 def _parse_item(
-    item: Any, pair: tuple[str, str], index: int, justification: bool = False
+    item: Any,
+    pair: tuple[str, str],
+    index: int,
+    justification: bool = False,
+    evidence_ids: Collection[str] | None = None,
 ) -> tuple[Optional[Comparison], list[str]]:
     left, right = pair
     if not isinstance(item, dict):
@@ -219,9 +243,19 @@ def _parse_item(
     if justification and (not isinstance(begruendung, str) or not begruendung.strip()):
         errors.append(f'Vergleich {index}: Feld "justification" fehlt oder ist leer')
 
+    belege = item.get("evidence")
+    if evidence_ids is not None:
+        if not isinstance(belege, list) or not all(isinstance(pid, str) for pid in belege):
+            errors.append(f'Vergleich {index}: Feld "evidence" fehlt oder ist keine Liste von IDs')
+        else:
+            unbekannt = [pid for pid in belege if pid not in evidence_ids]
+            if unbekannt:
+                errors.append(f"Vergleich {index}: unbekannte Passage-IDs {unbekannt}")
+
     if errors:
         return None, errors
     return Comparison(
         a=left, b=right, preference=preference, intensity=intensity,
         justification=begruendung.strip() if justification else None,
+        evidence=tuple(belege) if evidence_ids is not None else None,
     ), []

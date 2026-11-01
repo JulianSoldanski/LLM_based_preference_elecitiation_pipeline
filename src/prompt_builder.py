@@ -33,12 +33,28 @@ _PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 # ergeben die Platzhalter wörtlich den bisherigen Prompt, damit frühere Läufe
 # vergleichbar bleiben. Die Begründung steht wie in Schritt 3 vor dem Urteil.
 JUSTIFICATION_FIELD = '"justification": "<Begründung in ein bis zwei Sätzen>", '
-JUSTIFICATION_RULE = (
+_JUSTIFICATION_LINE = (
     '- "justification" begründet den Vergleich in ein bis zwei Sätzen und nennt die\n'
-    '  Aussagen, auf die du dich stützt. Schreibe die Begründung vor "preference".\n'
-    "- Gib keinen weiteren Fließtext und keine zusätzlichen Felder aus."
+    '  Aussagen, auf die du dich stützt. Schreibe die Begründung vor "preference".'
 )
+_NO_MORE_TEXT = "- Gib keinen weiteren Fließtext und keine zusätzlichen Felder aus."
+JUSTIFICATION_RULE = f"{_JUSTIFICATION_LINE}\n{_NO_MORE_TEXT}"
 NO_JUSTIFICATION_RULE = "- Gib keine Begründung, keinen Fließtext und keine zusätzlichen Felder aus."
+# Belegstellen (Spec 07, nur mit evidence=True, setzt justification): jede
+# Passage steht mit ID im Prompt, jeder Vergleich nennt die IDs, auf die er
+# sich stützt. Reihenfolge: justification, evidence, preference, intensity.
+EVIDENCE_FIELD = '"evidence": ["<Passage-ID>", ...], '
+EVIDENCE_RULE = (
+    f"{_JUSTIFICATION_LINE}\n"
+    '- "evidence" listet die IDs der Passagen (z. B. "P04"), auf die sich der\n'
+    "  Vergleich stützt. Nenne nur IDs, die oben stehen. Stützt sich der Vergleich\n"
+    "  auf keine Passage, gib eine leere Liste an.\n"
+    f"{_NO_MORE_TEXT}"
+)
+# Revision in Gate 2 (Spec 04): eigener, versionierter Prompt. Der Prompt von
+# Schritt 5 bleibt unverändert.
+REVISION_PROMPT = PROMPTS_DIR / "revision_v1.md"
+_SECTIONS = re.compile(r"\s*SYSTEM:\s*\n(?P<system>.*?)\n\s*USER:\s*\n(?P<user>.*)", re.DOTALL)
 
 
 class ConfigError(RuntimeError):
@@ -58,8 +74,15 @@ class PromptBuilder:
     assignment_codes: dict[str, str] = field(default_factory=dict)
     # Modell begründet jeden Paarvergleich (Prompt und Validierung).
     justification: bool = False
+    # Belegstellen: Passagen mit ID im Prompt, Feld evidence je Vergleich.
+    # Nur mit Fällen aus Gate 1 (with_gate1), setzt justification.
+    evidence: bool = False
+    # Vorlage für die Revision in Gate 2 (prompts/revision_v1.md).
+    revision_template: str = ""
 
     def __post_init__(self) -> None:
+        if self.evidence:
+            self.justification = True
         self._validate()
 
     # ------------------------------------------------------------------ laden
@@ -107,6 +130,8 @@ class PromptBuilder:
             cases=cases,
             system_template=_read_text(prompts_dir / "system.txt"),
             user_template=_read_text(prompts_dir / "user.txt"),
+            revision_template=_read_text(prompts_dir / REVISION_PROMPT.name)
+            if (prompts_dir / REVISION_PROMPT.name).is_file() else "",
             assignment_codes={
                 str(entry["assignment_code"]): str(entry["id"])
                 for entry in criteria_raw.get("criteria", [])
@@ -127,13 +152,15 @@ class PromptBuilder:
         for gate in gate_results:
             vorlage = self.case(gate["case_id"])
             texte = {p["passage_id"]: _clean(p["text"]) for p in sorted(gate["passages"], key=lambda p: p["position"])}
-            statements = {}
+            statements, passagen = {}, {}
             for code, passage_ids in gate["validated_evidence"].items():
                 if code not in self.assignment_codes:
                     raise ConfigError(f"Fall {vorlage.id!r}: Code {code!r} hat kein assignment_code in criteria.yaml")
                 reihenfolge = [pid for pid in texte if pid in passage_ids]
                 statements[self.assignment_codes[code]] = " ".join(texte[pid] for pid in reihenfolge)
-            cases.append(replace(vorlage, statements=statements))
+                # Einzeln mit ID für die Belegstellen (Spec 07).
+                passagen[self.assignment_codes[code]] = tuple((pid, texte[pid]) for pid in reihenfolge)
+            cases.append(replace(vorlage, statements=statements, passages=passagen))
         if not cases:
             raise ConfigError("Keine Gate-1-Ergebnisse übergeben.")
         # Reihenfolge aus cases.yaml, unabhängig von der Reihenfolge der Dateien:
@@ -167,6 +194,12 @@ class PromptBuilder:
         """Paarreihenfolge, gegen die die Modellantwort validiert wird."""
         return list(self.comparison_order)
 
+    def evidence_ids(self, case_id: str) -> set[str] | None:
+        """Passage-IDs, die im Prompt dieses Falls stehen; None ohne Belegstellen."""
+        if not self.evidence:
+            return None
+        return {pid for passagen in self.case(case_id).passages.values() for pid, _ in passagen}
+
     # ------------------------------------------------------------- Rendering
 
     def build_system(self) -> str:
@@ -182,10 +215,74 @@ class PromptBuilder:
                 "min_intensity": str(MIN_INTENSITY),
                 "max_intensity": str(MAX_INTENSITY),
                 "comparison_count": str(len(self.comparison_order)),
-                "justification_field": JUSTIFICATION_FIELD if self.justification else "",
-                "justification_rule": JUSTIFICATION_RULE if self.justification else NO_JUSTIFICATION_RULE,
+                **self._answer_format(),
             },
         )
+
+    def _answer_format(self) -> dict[str, str]:
+        """Platzhalter für Begründung und Belegstellen; ohne Option der alte Text."""
+        if self.evidence:
+            return {"justification_field": JUSTIFICATION_FIELD + EVIDENCE_FIELD, "justification_rule": EVIDENCE_RULE}
+        if self.justification:
+            return {"justification_field": JUSTIFICATION_FIELD, "justification_rule": JUSTIFICATION_RULE}
+        return {"justification_field": "", "justification_rule": NO_JUSTIFICATION_RULE}
+
+    def build_revision(
+        self,
+        case_id: str,
+        current: Iterable[Any],
+        pairs: list[tuple[str, str]],
+        comments: dict[tuple[str, str], str] | None = None,
+    ) -> tuple[str, str]:
+        """System- und User-Prompt für die Revision in Gate 2 (revision_v1).
+
+        Enthält Fall, Kriterien und Aussagen wie Schritt 5, das bisherige Urteil
+        je Paar und, falls vorhanden, den Kommentar des Menschen. Bewusst ohne
+        Gewichte und ohne Konsistenzmaß: das Modell soll gegen die Aussagen
+        urteilen, nicht auf eine Zahl hin.
+        """
+        match = _SECTIONS.fullmatch(self.revision_template or "")
+        if not match:
+            raise ConfigError(f"{REVISION_PROMPT.name}: Abschnitte 'SYSTEM:' und 'USER:' fehlen.")
+        by_id = self.criteria_by_id()
+        bisher = {(_feld(c, "a"), _feld(c, "b")): c for c in current}
+        bekannt = set(self.comparison_order)
+        zeilen = []
+        for index, (left, right) in enumerate(pairs, start=1):
+            if (left, right) not in bekannt or (left, right) not in bisher:
+                raise ConfigError(f"Paar ({left}, {right}) gehört nicht zu den Vergleichen dieses Falls")
+            alt = bisher[(left, right)]
+            zeilen.append(f"{index}. {by_id[left].name} ({left}) vs. {by_id[right].name} ({right})")
+            zeilen.append(f"   Bisheriges Urteil: {self._urteil_text(alt)}")
+            if _feld(alt, "justification", None):
+                zeilen.append(f"   Bisherige Begründung: {_feld(alt, 'justification')}")
+            kommentar = ((comments or {}).get((left, right)) or "").strip()
+            if kommentar:
+                zeilen.append(f"   Kommentar der prüfenden Person: {kommentar}")
+        case = self.case(case_id)
+        werte = {
+            "criteria_block": self._criteria_block(),
+            "scale_block": self._scale_block(),
+            "scale_source": str(self.scale.get("source", "")),
+            "indifference": INDIFFERENCE,
+            "indifference_intensity": str(INDIFFERENCE_INTENSITY),
+            "min_intensity": str(MIN_INTENSITY),
+            "max_intensity": str(MAX_INTENSITY),
+            "comparison_count": str(len(pairs)),
+            **self._answer_format(),
+            "scenario_intro": _clean(self.scenario.get("intro", "")),
+            "case_title": case.title,
+            "component": case.component,
+            "statements_block": self._statements_block(case),
+            "revision_block": "\n".join(zeilen),
+        }
+        return _render(match["system"].strip(), werte), _render(match["user"].strip(), werte)
+
+    def _urteil_text(self, vergleich: Any) -> str:
+        praeferenz = _feld(vergleich, "preference")
+        if praeferenz == INDIFFERENCE:
+            return f'"{INDIFFERENCE}" (beide gleich wichtig)'
+        return f"{self.criteria_by_id()[praeferenz].name} ({praeferenz}) wichtiger, Intensität {_feld(vergleich, 'intensity')}"
 
     def build_user(self, case_id: str) -> str:
         case = self.case(case_id)
@@ -218,6 +315,14 @@ class PromptBuilder:
         # Mit Kriteriumslabel: die Zuordnung Aussage -> Kriterium ist vorgegeben,
         # genau wie im Fragebogen. Die Reihenfolge folgt der statement_order.
         by_id = self.criteria_by_id()
+        if self.evidence:
+            # Belegstellen: jede Passage einzeln mit ihrer ID statt verbunden.
+            if not case.passages:
+                raise ConfigError(f"Fall {case.id!r}: Belegstellen gibt es nur mit Passagen aus Gate 1")
+            return "\n".join(
+                f"- {by_id[cid].name}:\n" + "\n".join(f"  [{pid}] {text}" for pid, text in case.passages[cid])
+                for cid in case.statement_order
+            )
         return "\n".join(
             f"- {by_id[cid].name}: {text}" for cid, text in case.ordered_statements()
         )
@@ -308,6 +413,13 @@ def _render(template: str, values: dict[str, str]) -> str:
     # Ein leerer optionaler Block (z.B. ein nicht gepflegter Hinweis) soll keine
     # doppelte Leerzeile hinterlassen.
     return re.sub(r"\n{3,}", "\n\n", _PLACEHOLDER.sub(replace, template))
+
+
+def _feld(objekt: Any, name: str, *default: Any) -> Any:
+    """Feld aus Dict oder Objekt (Comparison, Judgment)."""
+    if isinstance(objekt, dict):
+        return objekt.get(name, *default) if default else objekt[name]
+    return getattr(objekt, name, *default)
 
 
 def _clean(text: Any) -> str:

@@ -22,6 +22,8 @@ from schema import CONDITION_HISTORY, CONDITION_STATELESS, Response
 RESULTS_DIR = ROOT / "results"
 # Dateinamenszusatz für Läufe mit Begründung: anderer Prompt, andere Messung.
 JUSTIFICATION_SUFFIX = "_justification"
+# Belegstellen (Spec 07, nur im Artefakt): schließt die Begründung ein.
+EVIDENCE_SUFFIX = "_evidence"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -65,14 +67,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Gibt alle Prompts aus, ohne ein Modell aufzurufen.",
-    )
-    parser.add_argument(
-        "--gate1",
-        type=Path,
-        nargs="+",
-        required=True,
-        help="Validierte Gate-1-Dateien (<lauf>_r<n>_<fall>_gate1.json), eine je Fall. "
-        "Die Aussagen kommen ausschließlich von dort.",
     )
 
     args = parser.parse_args(argv)
@@ -146,19 +140,10 @@ def resolve_cases(builder: PromptBuilder, selected: list[str] | None) -> list[st
     return selected
 
 
-def builder_aus_gate1(
-    paths: list[Path], justification: bool = False
-) -> tuple[PromptBuilder, list[dict[str, str]]]:
-    """Schritt 5 liest nur den validierten Output von Gate 1. Import hier,
-    weil gate1_cli über assignment dieses Modul importiert."""
-    from gate1 import GateError
-    from gate1_cli import builder_from_gate1
-
-    try:
-        builder, quellen = builder_from_gate1(paths)
-    except GateError as exc:
-        raise SystemExit(f"Gate 1: {exc}") from None
-    return replace(builder, justification=justification), quellen
+def experiment_builder(justification: bool = False) -> PromptBuilder:
+    """Experiment: die festen Aussagen aus config/cases.yaml, wortgleich zum
+    Fragebogen. Das Artefakt (Aussagen aus Gate 1) läuft nur über den Viewer."""
+    return replace(PromptBuilder.from_paths(), justification=justification)
 
 
 def print_prompts(builder: PromptBuilder, case_ids: list[str]) -> None:
@@ -176,7 +161,7 @@ def print_prompts(builder: PromptBuilder, case_ids: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    builder, _ = builder_aus_gate1(args.gate1, args.justification)
+    builder = experiment_builder(args.justification)
     case_ids = resolve_cases(builder, args.cases)
 
     # Auch im Trockenlauf warnen: dort wird der Prompt vor der Erhebung geprüft.
