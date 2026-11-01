@@ -1,0 +1,23 @@
+# Rechnung von Schritt 6 (src/ahp.py): Gewichte und Konsistenzverhältnis.
+#
+# Gewichte: Zeilen-geometrisches Mittel, wie pyDecision.ahp_method(wd="g") im
+# Notebook. Random Index wie in pyDecision (installiert 5.1.1, Formel und
+# Tabelle unverändert in 5.1.8).
+weight_method: row_geometric_mean
+random_index_source: "pyDecision 5.1.8"
+
+# Schwelle für CR. by_n überschreibt default für eine Matrixgröße.
+# n = 3: 0,05 nach Saaty (1994), Entscheidung vom 25.10.2026 (DD11).
+cr_threshold:
+  default: 0.10
+  by_n:
+    3: 0.05
+
+# Gate 2 (src/gate2.py): höchstens so viele Zyklen; im letzten nur confirm/set.
+gate2_max_cycles: 3
+
+# Reparaturschleife (src/repair.py, nur mit --repair, in Evaluationsläufen aus).
+repair_max_attempts: 3
+# n = 3: welche Urteile zurückgehen. all = alle drei gemeinsam,
+# fewest_passages = das Paar mit den wenigsten Passagen aus Gate 1.
+repair_rule_n3: all
