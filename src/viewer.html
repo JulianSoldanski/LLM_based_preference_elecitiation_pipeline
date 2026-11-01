@@ -82,6 +82,7 @@
   <form id="form">
     <select id="provider"><option>openai</option><option>anthropic</option><option>mistral</option></select>
     <input id="model" value="gpt-4o-2024-08-06" placeholder="Modell-ID" required>
+    <label class="muted">Fall <select id="fall"></select></label>
     <label class="muted">Läufe <input id="runs" type="number" min="1" value="1"></label>
     <label class="muted">Pause <input id="pause" type="number" min="0" step="0.5" value="2"> s</label>
     <button class="primaer" id="start">Start</button>
@@ -110,7 +111,9 @@
   let fall = null;           // in Gate 1 geöffneter Fall
   let entwurf = {};          // Gate 1: { fall: { passage_id: {action, new_criterion, reason, timestamp} } }
   let entscheidungsgrund = "";
-  let ansicht = null;        // "zuordnung" oder "paarvergleich"; null = automatisch
+  let ansicht = null;        // "zuordnung", "paarvergleich" oder "gate2"; null = automatisch
+  let fall2 = null;          // in Gate 2 gewählter Fall
+  let entwurf2 = {};         // Gate 2: { fall: { "a|b": {action, preference, intensity, reason} } } je Zyklus
 
   async function api(pfad, body) {
     const antwort = await fetch(pfad, body ? { method: "POST", body: JSON.stringify(body) } : undefined);
@@ -124,6 +127,10 @@
   const herkunft = (p) => (p.case ? `${p.case.replace(/^Fall \d+: /, "")} · ${p.statement}` : "");
   const ergebnis = (r) => (r.status !== "ok" ? "failed" : r.criteria.join(", ") || "none");
   const codes = () => basis.criteria.map((c) => c.id);
+  // Die Pipeline bearbeitet einen Fall: vor dem Start der im Formular gewählte,
+  // danach der des Laufs (null bei älteren Läufen über alle Fälle).
+  const aktiverFall = () => (st.running || st.result || st.error ? st.case : $("#fall").value);
+  const fallPassagen = () => basis.passages.filter((p) => !aktiverFall() || p.doc_id === aktiverFall());
 
   // ---------------------------------------------------------------- Gate 1
 
@@ -208,7 +215,7 @@
       .concat(basis.criteria.map((c) => ({ code: c.id, titel: `${c.id} <span>${esc(c.name)}</span>`, karten: [] })))
       .concat([{ code: "none", titel: "none <span>kein Kriterium</span>", karten: [] }]);
     const failed = { code: "failed", titel: "Failed", karten: [] };
-    for (const p of basis.passages) {
+    for (const p of fallPassagen()) {
       const r = fertig.get(p.passage_id), erwartet = p.expected_criteria;
       if (!r) {
         spalten[0].karten.push(karte(p.passage_id, "offen", st.current === p.passage_id && run === st.run ? "jetzt" : ""));
@@ -241,7 +248,7 @@
 
   function zeichnen() {
     const laufend = st.running, gate = gateModus();
-    $("#start").disabled = laufend || !!st.step5?.running;
+    $("#start").disabled = $("#fall").disabled = laufend || !!st.step5?.running;
     const alleFertig = gate && st.gate1 && faelle().every(fallFertig);
 
     const schritte = [
@@ -249,15 +256,17 @@
       ["Zuordnung", laufend ? "aktiv" : st.result ? "fertig" : ""],
       ["Gate 1", alleFertig ? "fertig" : gate ? "aktiv" : "", "zuordnung"],
       ["Paarvergleich", st.step5?.running ? "aktiv" : st.step5?.result ? "fertig" : "", "paarvergleich"],
+      ["Gate 2", !st.gate2 ? "" : Object.values(st.gate2.cases).every((c) => ["done", "invalid"].includes(c.state)) ? "fertig" : "aktiv", "gate2"],
     ];
     // Mit gestartetem Paarvergleich lässt sich über die Schrittleiste zurück zum Gate wechseln.
     $("#schritte").innerHTML = schritte.map(([n, k, a], i) =>
       (i ? '<span class="muted">→</span>' : "") +
-      `<span class="schritt ${k}" ${st.step5 && a ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+      `<span class="schritt ${k}" ${st.step5 && a && (a !== "gate2" || st.gate2) ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+    if (st.step5 && ansicht === "gate2" && st.gate2) return zeichnenGate2();
     if (st.step5 && ansicht !== "zuordnung") return zeichnenPaarvergleich();
 
-    const n = basis.passages.length;
-    let text = "Bereit. Anbieter und Modell wählen, dann Start.";
+    const n = fallPassagen().length;
+    let text = "Bereit. Anbieter, Modell und Fall wählen, dann Start.";
     if (laufend) text = `Lauf ${st.run}/${st.runs} · ${st.records.filter((r) => r.run === st.run).length} von ${n} Passagen zugeordnet · ${esc(st.provider)} ${esc(st.model)}`;
     else if (st.error) text = `<span class="bad-text">Abgebrochen: ${esc(st.error)}</span>`;
     else if (st.result) {
@@ -277,34 +286,34 @@
     const letzte = st.records[st.records.length - 1];
     if (gate && !st.gate1) {
       fokus.innerHTML = `<div class="kopf">Gate 1: Zuordnung prüfen</div>
-        <span class="muted">Ein Mensch prüft je Fall die Zuordnung von Lauf ${run}. Die Zeit läuft ab dem Öffnen eines Falls.</span>
+        <span class="muted">Ein Mensch prüft die Zuordnung von Lauf ${run}. Die Zeit läuft ab dem Öffnen.</span>
         <div class="zeile"><button class="primaer" id="gatestart">Gate 1 starten (Lauf ${run})</button></div>`;
     } else if (gate) {
       const tabs = faelle().map((d) => {
         const f = fallFertig(d);
-        const zeichen = f ? (f.decision === "continue" ? " ✓" : " ■") : "";
+        const zeichen = f ? (f.problem ? " ⚠" : f.decision === "continue" ? " ✓" : " ■") : "";
         return `<button class="${d === fall ? "aktiv" : ""}" data-fall="${esc(d)}">${esc(d)}${zeichen}</button>`;
       }).join(" ");
-      const fertigeDateien = faelle().filter((d) => fallFertig(d)?.decision === "continue").map((d) => fallFertig(d).file);
-      fokus.innerHTML = `<div class="kopf">Gate 1 · Lauf ${gateRun()}</div>
+      const frei = faelle().filter((d) => fallFertig(d)?.decision === "continue");
+      fokus.innerHTML = `<div class="kopf">Gate 1 · Lauf ${gateRun()} · Fall ${esc(fall ?? faelle()[0])}</div>
         <div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
-        <span class="faelle">${tabs}</span></div>
-        ${!alleFertig ? "" : fertigeDateien.length ? `
+        ${faelle().length > 1 ? `<span class="faelle">${tabs}</span>` : ""}</div>
+        ${!alleFertig ? "" : frei.length ? `
           <div class="zeile"><b>Weiter mit Schritt 5: Paarvergleich</b>
-            <span class="muted">${fertigeDateien.length} freigegebene Fälle · Anbieter, Modell und Pause wie oben</span></div>
+            <span class="muted">${frei.length > 1 ? `${frei.length} freigegebene Fälle` : `Fall ${esc(frei[0])} freigegeben`} · Anbieter, Modell und Pause wie oben</span></div>
           <div class="zeile">
-            <label class="muted">Bedingung <select id="bedingung"><option>stateless</option><option>history</option></select></label>
             <label class="muted">Läufe <input id="runs5" type="number" min="1" value="1" style="width:64px"></label>
             <label class="muted" title="Das Modell begründet jeden Paarvergleich. Ändert den Prompt; Ergebnis in eigener Datei."><input id="begruendung5" type="checkbox"> mit Begründung</label>
+            <label class="muted" title="Spec 07: Passagen mit ID im Prompt, jedes Urteil nennt seine Belegstellen (schließt die Begründung ein). Ergebnis in eigener Datei."><input id="belege5" type="checkbox"> mit Belegstellen</label>
             <button class="primaer" id="paarvergleich" ${st.step5?.running ? "disabled" : ""}>Paarvergleich starten</button></div>`
-          : '<div class="zeile">Alle Fälle abgeschlossen. Kein Fall hat Gate 1 mit continue verlassen, an Schritt 5 geht nichts.</div>'}`;
+          : '<div class="zeile">Gate 1 abgeschlossen ohne continue, an Schritt 5 geht nichts.</div>'}`;
     } else if (st.current && run === st.run) {
       const p = passage(st.current);
       fokus.innerHTML = `<div class="kopf">Wird zugeordnet: ${esc(p.passage_id)} <span class="muted">${esc(herkunft(p))}</span></div>${esc(p.text)}`;
     } else if (letzte) {
       fokus.innerHTML = `<div class="kopf">Zuletzt: ${esc(letzte.passage_id)} → ${esc(ergebnis(letzte))}</div><span class="muted">${esc(letzte.justification ?? letzte.errors.join("; "))}</span>`;
     } else {
-      fokus.innerHTML = `<span class="muted">${n} Passagen warten · Katalog ${esc(basis.criteria_file)}</span>`;
+      fokus.innerHTML = `<span class="muted">${n} Passagen von Fall ${esc(aktiverFall())} warten · Katalog ${esc(basis.criteria_file)}</span>`;
     }
 
     // Spalten
@@ -325,6 +334,11 @@
   function entscheidung() {
     if (!(gateModus() && st.gate1 && fall)) return ($("#entscheidung").innerHTML = "");
     const f = fallFertig(fall);
+    if (f?.problem) {
+      $("#entscheidung").innerHTML = `<div class="entscheidung"><b class="bad-text">Fall ${esc(fall)}: ${esc(f.problem)}</b>
+        <span class="muted">· Nichts wird automatisch gelöscht oder überschrieben; bitte ${esc(f.file)} und das Ereignislog von Hand prüfen.</span></div>`;
+      return;
+    }
     if (f) {
       const c = f.counts;
       $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Fall ${esc(fall)} abgeschlossen: ${esc(f.decision)}</b> → ${esc(f.status)}
@@ -377,8 +391,8 @@
     fehler();
     try {
       st = await api("/api/step5/start", { provider: $("#provider").value, model: $("#model").value,
-        pause: Number($("#pause").value), runs: Number($("#runs5").value), condition: $("#bedingung").value,
-        justification: $("#begruendung5").checked });
+        pause: Number($("#pause").value), runs: Number($("#runs5").value),
+        justification: $("#begruendung5").checked, evidence: $("#belege5").checked });
       ansicht = "paarvergleich";
       abfragen();
     } catch (e) { fehler(e); }
@@ -388,7 +402,8 @@
     const s5 = st.step5, run = s5.run, name = (id) => s5.names[id] ?? id;
     const urteil = (c) => (c.preference in s5.names ? `${name(c.preference)} ${c.intensity}` : c.preference);
     const fertigImLauf = s5.responses.filter((r) => r.run === run).length;
-    let text = `Paarvergleich · ${esc(s5.condition)}${s5.justification ? " · mit Begründung" : ""} · Lauf ${run}/${s5.runs} · ${fertigImLauf} von ${s5.cases.length} Fällen · ${esc(s5.provider)} ${esc(s5.model)}`;
+    const umfang = s5.cases.length > 1 ? `${fertigImLauf} von ${s5.cases.length} Fällen` : esc(s5.cases[0]?.title ?? "");
+    let text = `Paarvergleich${s5.evidence ? " · mit Belegstellen" : s5.justification ? " · mit Begründung" : ""} · Lauf ${run}/${s5.runs} · ${umfang} · ${esc(s5.provider)} ${esc(s5.model)}`;
     if (s5.error) text = `<span class="bad-text">Paarvergleich abgebrochen: ${esc(s5.error)}</span>`;
     else if (s5.result) text = `Paarvergleich fertig · ${s5.runs} Lauf/Läufe · ${esc(s5.result)}`;
     $("#statustext").innerHTML = text;
@@ -398,7 +413,8 @@
     fokus.classList.toggle("laeuft", !!aktuell);
     fokus.innerHTML = aktuell
       ? `<div class="kopf">Wird verglichen: ${esc(aktuell.title)}</div><span class="muted">Das Modell liest die Aussagen unten und füllt die Paarvergleiche aus.</span>`
-      : s5.result ? `<div class="kopf">Paarvergleich abgeschlossen</div><span class="muted">Rohurteile in ${esc(s5.result)}. Die Gewichtung folgt in einem eigenen Auswertungsschritt.</span>`
+      : s5.result ? `<div class="kopf">Paarvergleich abgeschlossen</div><span class="muted">Rohurteile in ${esc(s5.result)}. Gewichte und CR rechnet der Code in Gate 2.</span>
+          ${st.gate2 ? '<div class="zeile"><button class="primaer" id="gate2start">Weiter mit Gate 2</button></div>' : ""}`
       : `<span class="muted">Startet …</span>`;
 
     $("#spalten").innerHTML = s5.cases.map((c) => {
@@ -416,7 +432,8 @@
             zaehler[u] = (zaehler[u] || 0) + 1;
           });
           const top = Object.entries(zaehler).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([u, k]) => `${esc(u)} (${k})`).join(" · ");
-          const grund = cmp.justification ? `<tr><td colspan="2" class="muted" style="border-top:none; padding-top:0">${esc(cmp.justification)}</td></tr>` : "";
+          const belege = cmp.evidence ? ` · Belege: ${cmp.evidence.length ? esc(cmp.evidence.join(", ")) : "keine"}` : "";
+          const grund = cmp.justification ? `<tr><td colspan="2" class="muted" style="border-top:none; padding-top:0">${esc(cmp.justification)}${belege}</td></tr>` : "";
           return `<tr><td>${esc(name(cmp.a))} vs. ${esc(name(cmp.b))}</td><td><b>${esc(urteil(cmp))}</b>${s5.runs > 1 ? `<br><span class="muted">${top}</span>` : ""}</td></tr>${grund}`;
         }).join("")}</table>`;
       }
@@ -426,6 +443,116 @@
       + (s5.justification ? " · grau darunter: Begründung des Modells im aktuellen Lauf." : ".");
     $("#entscheidung").innerHTML = "";
     $("#detail").innerHTML = "";
+  }
+
+
+  // ------------------------------------------------------------------ Gate 2
+
+  const paarKey = (p) => p.pair.join("|");
+
+  function g2Fall() {
+    const faelle2 = Object.keys(st.gate2.cases);
+    if (!fall2 || !st.gate2.cases[fall2]) fall2 = faelle2.find((c) => ["open", "active"].includes(st.gate2.cases[c].state)) ?? faelle2[0];
+    return st.gate2.cases[fall2];
+  }
+
+  function g2Pruefen(f) {
+    const e = entwurf2[fall2] ?? {};
+    const offen = f.pairs.filter((p) => !e[paarKey(p)]?.action).length;
+    const ohneGrund = f.pairs.filter((p) => ["revise", "set"].includes(e[paarKey(p)]?.action) && !(e[paarKey(p)].reason ?? "").trim()).length;
+    const ohneWert = f.pairs.filter((p) => e[paarKey(p)]?.action === "set" && !e[paarKey(p)].preference).length;
+    return { offen, ohneGrund, ohneWert, fertig: !offen && !ohneGrund && !ohneWert };
+  }
+
+  function zeichnenGate2() {
+    const g2 = st.gate2, f = g2Fall(), faelle2 = Object.keys(g2.cases);
+    const fertig = faelle2.filter((c) => g2.cases[c].state === "done").length;
+    $("#statustext").innerHTML = `Gate 2 · Lauf ${g2.run} von Schritt 5 · ` + (faelle2.length > 1
+      ? `${fertig} von ${faelle2.length} Fällen abgeschlossen` : `Fall ${esc(fall2)}${fertig ? " abgeschlossen" : ""}`);
+    $("#laeufe").innerHTML = "";
+    const zeichen = { done: (c) => (g2.cases[c].decision === "accept" ? " ✓" : " ■"), problem: () => " ⚠", invalid: () => " ✗", active: () => " •", open: () => "" };
+    const tabs = faelle2.map((c) => `<button class="${c === fall2 ? "aktiv" : ""}" data-fall2="${esc(c)}">${esc(c)}${zeichen[g2.cases[c].state](c)}</button>`).join(" ");
+    const fokus = $("#fokus");
+    fokus.classList.remove("laeuft");
+    fokus.innerHTML = `<div class="kopf">Gate 2: Paarvergleiche und Gewichte prüfen</div>
+      <span class="muted">Je Paar zuerst die Evidenz, dann der Vorschlag des Modells. Gewichte und CR rechnet der Code.</span>
+      <div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
+        ${faelle2.length > 1 ? `<span class="faelle">${tabs}</span>` : ""}</div>
+      ${f?.state === "open" ? `<div class="zeile">
+        <label class="muted" title="Spec 06, nur Demo: liegt CR über der Schwelle, gehen die Urteile vorab bis zu dreimal an den Agenten. In Evaluationsläufen aus."><input id="reparatur2" type="checkbox"> automatische CR-Reparatur vorab</label>
+        <button class="primaer" id="gate2oeffnen">Fall ${esc(fall2)} öffnen</button></div>` : ""}`;
+
+    $("#spalten").innerHTML = f?.state === "active" ? f.pairs.map((p) => g2Karte(f, p)).join("") : "";
+    $("#legende").textContent = f?.state === "active"
+      ? "Je Paar eine Aktion: bestätigen, mit Kommentar an den Agenten zurückgeben (revise) oder selbst setzen (set). Im letzten Zyklus kein revise."
+      : "";
+    $("#detail").innerHTML = "";
+    g2Entscheidung(f);
+  }
+
+  function g2Karte(f, p) {
+    const name = (id) => f.names[id] ?? id;
+    const [a, b] = p.pair, key = paarKey(p), e = entwurf2[fall2]?.[key] ?? {};
+    const vorschlag = p.preference === "gleich" ? "gleich wichtig" : `${name(p.preference)} wichtiger, Intensität ${p.intensity}`;
+    // Belegstellen: zitierte Passagen nur markieren, nicht doppelt zeigen.
+    const zitiert = (pid) => p.cited?.includes(pid) ? ' <span class="muted">· zitiert</span>' : "";
+    const passagen = (liste) => liste.map(([pid, t]) => `<li><b>[${esc(pid)}]</b> ${esc(t)}${zitiert(pid)}</li>`).join("");
+    const ohneBeleg = p.cited && !p.cited.length ? '<p class="muted">Das Modell zitiert keine Passage (Urteil nur aus Modellwissen).</p>' : "";
+    const evidenz = [a, b].map((cid) => `<p class="muted" style="margin:0"><b>${esc(name(cid))}</b></p><ul>${passagen(p.evidence[cid])}</ul>`).join("");
+    const urteil = (u) => (u.preference === "gleich" ? "gleich wichtig" : `${name(u.preference)} ${u.intensity}`);
+    const verlauf = p.history.length ? `<p class="muted" style="margin:0"><b>Bisherige Zyklen</b></p><ul>${p.history.map((h) =>
+      `<li>Zyklus ${h.cycle} · ${h.action === "revise" ? "zurück an Agent" : "selbst gesetzt"}: „${esc(h.reason)}“ · ${esc(urteil(h.before))} → ${esc(urteil(h.after))}</li>`).join("")}</ul>` : "";
+    const knopf = (aktion, text, aus = false) =>
+      `<button data-g2aktion="${aktion}" data-paar="${esc(key)}" class="${e.action === aktion ? "aktiv" : ""}" ${aus ? "disabled" : ""}>${text}</button>`;
+    const setzen = e.action !== "set" ? "" : `<div class="zeile">
+      <select data-g2feld="preference" data-paar="${esc(key)}"><option value="">wichtiger …</option>${[a, b, "gleich"].map((c) =>
+        `<option value="${c}" ${e.preference === c ? "selected" : ""}>${c === "gleich" ? "gleich wichtig" : esc(name(c))}</option>`).join("")}</select>
+      ${e.preference && e.preference !== "gleich" ? `<select data-g2feld="intensity" data-paar="${esc(key)}">${[2, 3, 4, 5, 6, 7, 8, 9].map((i) =>
+        `<option ${Number(e.intensity) === i ? "selected" : ""}>${i}</option>`).join("")}</select>` : ""}</div>`;
+    const grund = ["revise", "set"].includes(e.action)
+      ? `<textarea data-g2feld="reason" data-paar="${esc(key)}" placeholder="${e.action === "revise" ? "Kommentar an den Agenten (Pflicht)" : "Begründung (Pflicht)"}">${esc(e.reason ?? "")}</textarea>` : "";
+    return `<div class="spalte"><h2>${esc(name(a))} vs. ${esc(name(b))}</h2>${evidenz}${ohneBeleg}
+      ${p.justification ? `<p class="muted">Begründung des Modells: ${esc(p.justification)}</p>` : ""}
+      ${verlauf}
+      <p><b>Vorschlag:</b> ${esc(vorschlag)}</p>
+      <div class="zeile">${knopf("confirm", "Bestätigen")}${knopf("revise", "Zurück an Agent", !f.revise_allowed)}${knopf("set", "Selbst setzen")}</div>
+      ${setzen}${grund}</div>`;
+  }
+
+  function g2Entscheidung(f) {
+    if (!f) return ($("#entscheidung").innerHTML = "");
+    const name = (id) => f.names?.[id] ?? id;
+    const gewichte = (ev) => Object.entries(ev.weights).map(([c, w]) => `${esc(name(c))} ${w.toFixed(3)}`).join(" · ");
+    if (f.state === "done") {
+      const ev = f.final.evaluation;
+      $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Fall ${esc(fall2)} abgeschlossen: ${esc(f.decision)}</b> → ${esc(f.status)}
+        <br><span class="muted">${gewichte(ev)} · CR ${ev.cr.toFixed(3)} (Schwelle ${ev.cr_threshold}) · CR₀ ${f.cr_0.toFixed(3)} · ${f.cycles} Zyklus/Zyklen · ${esc(f.file)} (schreibgeschützt)</span></div>`;
+      return;
+    }
+    if (f.state === "problem") return ($("#entscheidung").innerHTML = `<div class="entscheidung"><b class="bad-text">Fall ${esc(fall2)}: ${esc(f.problem)}</b></div>`);
+    if (f.state === "invalid") return ($("#entscheidung").innerHTML = `<div class="entscheidung"><b>Fall ${esc(fall2)}:</b> ungültige Antwort aus Schritt 5, kommt nicht in Gate 2 <span class="muted">(${esc(f.errors.join("; "))})</span></div>`);
+    if (f.state !== "active") return ($("#entscheidung").innerHTML = "");
+    const ev = f.evaluation, p = g2Pruefen(f);
+    const ueber = ev.consistent ? "" : ' <b class="bad-text">CR über der Schwelle</b>';
+    const reparatur = f.repair ? ` · Reparatur vorab: CR₀ ${f.repair.cr_0.toFixed(3)} → ${f.repair.cr_after_repair.toFixed(3)} in ${f.repair.repair_attempts.length} Versuch(en)${f.repair.repair_warning ? " ⚠" : ""}` : "";
+    const zyklus = Math.min(f.cycle, f.max_cycles);
+    const hinweise = f.hints.map((h) => `<br><span class="bad-text">${esc(h)}</span>`).join("");
+    const aktionen = f.can_decide
+      ? `<div class="zeile"><input id="g2grund" placeholder="Begründung zur Entscheidung (optional)" style="flex:1; min-width:200px">
+          <button class="primaer" data-g2decision="accept">accept</button><button data-g2decision="reject">reject</button></div>`
+      : `<div class="zeile">${p.offen ? `<button id="g2rest">Übrige ${p.offen} bestätigen</button>` : ""}
+          <button class="primaer" id="g2zyklus" ${p.fertig ? "" : "disabled"} title="${p.fertig ? "" : "Jedes Urteil braucht eine Aktion, revise und set eine Begründung, set einen Wert"}">Zyklus ${zyklus} abschließen</button></div>`;
+    $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Gewichte:</b> ${gewichte(ev)}
+      <br><b>CR ${ev.cr.toFixed(3)}</b> · Schwelle ${ev.cr_threshold}${ueber}
+      <br><span class="muted">${f.can_decide ? "Prüfung beendet, bitte entscheiden" : `Zyklus ${zyklus} von max. ${f.max_cycles}`} · CR₀ ${f.initial_cr.toFixed(3)}${reparatur}</span>${hinweise}
+      ${aktionen}</div>`;
+  }
+
+  async function g2Api(pfad, body, warten = "") {
+    fehler();
+    if (warten) $("#statustext").textContent = warten;
+    try { st = await api(pfad, body); } catch (e) { fehler(e); }
+    zeichnen();
   }
 
   // ------------------------------------------------------------------ Abfrage
@@ -445,10 +572,12 @@
   $("#form").onsubmit = async (e) => {
     e.preventDefault();
     const offen = gateModus() && st.gate1 && faelle().some((d) => !fallFertig(d));
-    if (offen && !confirm("Gate 1 ist nicht für alle Fälle abgeschlossen. Trotzdem einen neuen Lauf starten?")) return;
+    if (offen && !confirm("Gate 1 ist noch nicht abgeschlossen. Trotzdem einen neuen Lauf starten?")) return;
     fehler();
+    speicher.set("fall", $("#fall").value);
     try {
-      st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value, runs: Number($("#runs").value), pause: Number($("#pause").value) });
+      st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value, case: $("#fall").value,
+        runs: Number($("#runs").value), pause: Number($("#pause").value) });
       angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
       abfragen();
     } catch (err) { fehler(err); }
@@ -457,14 +586,42 @@
   $("#fokus").onclick = (e) => {
     if (e.target.id === "gatestart") return oeffnen(faelle()[0]);
     if (e.target.id === "paarvergleich") return paarvergleichStarten();
+    if (e.target.id === "gate2start") { ansicht = "gate2"; return zeichnen(); }
+    if (e.target.dataset?.fall2) { fall2 = e.target.dataset.fall2; return zeichnen(); }
+    if (e.target.id === "gate2oeffnen") {
+      const reviewer = $("#reviewer").value.trim();
+      if (!reviewer) return fehler("Bitte zuerst ein Kürzel als Prüfer eintragen.");
+      speicher.set("reviewer", reviewer);
+      const reparatur = $("#reparatur2").checked;
+      return g2Api("/api/gate2/open", { run: st.gate2.run, case_id: fall2, reviewer, repair: reparatur },
+        reparatur ? "Reparatur läuft …" : "");
+    }
     const d = e.target.dataset?.fall;
     if (d) fallFertig(d) ? ((fall = d), (gewaehlt = null), zeichnen()) : oeffnen(d);
   };
+  // Vor dem Start zeigen die Spalten die Passagen des gewählten Falls.
+  $("#fall").onchange = () => { speicher.set("fall", $("#fall").value); zeichnen(); };
   $("#fokus").onchange = (e) => { if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim()); };
 
   $("#spalten").onclick = (e) => {
+    const knopf = e.target.closest("[data-g2aktion]");
+    if (knopf && !knopf.disabled) {
+      const eintrag = ((entwurf2[fall2] ??= {})[knopf.dataset.paar] ??= {});
+      eintrag.action = knopf.dataset.g2aktion;
+      if (eintrag.action !== "set") { delete eintrag.preference; delete eintrag.intensity; }
+      return zeichnen();
+    }
     const chip = e.target.closest(".chip");
     if (chip) { gewaehlt = chip.dataset.pid; zeichnen(); }
+  };
+  $("#spalten").oninput = (e) => {
+    const feld = e.target.dataset?.g2feld;
+    if (!feld) return;
+    const eintrag = ((entwurf2[fall2] ??= {})[e.target.dataset.paar] ??= {});
+    eintrag[feld] = e.target.value;
+    if (feld === "preference") eintrag.intensity = e.target.value && e.target.value !== "gleich" ? eintrag.intensity ?? 2 : 0;
+    if (feld === "reason") return g2Entscheidung(g2Fall());  // Fokus im Textfeld behalten
+    zeichnen();
   };
   $("#spalten").ondragstart = (e) => {
     const chip = e.target.closest(".chip");
@@ -505,6 +662,23 @@
 
   $("#entscheidung").oninput = (e) => { if (e.target.id === "entscheidungsgrund") entscheidungsgrund = e.target.value; };
   $("#entscheidung").onclick = (e) => {
+    if (st.step5 && ansicht === "gate2" && st.gate2) {
+      const f = g2Fall();
+      if (e.target.id === "g2rest") {
+        for (const p of f.pairs) ((entwurf2[fall2] ??= {})[paarKey(p)] ??= {}).action ??= "confirm";
+        return zeichnen();
+      }
+      if (e.target.id === "g2zyklus" && !e.target.disabled) {
+        const actions = f.pairs.map((p) => ({ pair: p.pair, ...entwurf2[fall2][paarKey(p)] }));
+        const revise = actions.some((a) => a.action === "revise");
+        entwurf2[fall2] = {};
+        return g2Api("/api/gate2/cycle", { case_id: fall2, actions }, revise ? "Revision durch den Agenten läuft …" : "");
+      }
+      const d = e.target.dataset?.g2decision;
+      if (d && confirm(`Fall ${fall2} mit „${d}“ abschließen? Danach ist nichts mehr änderbar.`))
+        return g2Api("/api/gate2/close", { case_id: fall2, decision: d, reason: $("#g2grund").value });
+      return;
+    }
     if (e.target.id === "restbestaetigen") {
       for (const pid of pruefen(fall).offen) setzen(pid, "confirm");
       return;
@@ -525,6 +699,8 @@
   (async () => {
     try {
       basis = await api("/api/basis");
+      $("#fall").innerHTML = basis.cases.map((c) => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join("");
+      if (basis.cases.some((c) => c.id === speicher.get("fall"))) $("#fall").value = speicher.get("fall");
       abfragen();
     } catch (e) { fehler(e); }
   })();
