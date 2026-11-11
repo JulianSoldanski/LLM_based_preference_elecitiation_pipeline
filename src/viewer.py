@@ -46,7 +46,7 @@ from urllib.parse import urlparse
 
 from agent import LLMClient, build_client
 from experiment import run_experiment
-from assignment import CRITERIA_FILE, PASSAGES_FILE, load_criteria, load_passages, run_assignment
+from assignment import CRITERIA_FILE, PASSAGES_FILE, load_criteria, load_passages, run_assignment, sha256
 from assignment_eval import evaluate_file
 from relevance import OUT_DIR as SEARCH_DIR, run_search
 from gate1 import SUPERVISED, Action, Actions, GateError, apply_gate1, assignments_from_records
@@ -233,11 +233,40 @@ def _durchlauf(client: LLMClient, runs: int, suche: Path) -> None:
 
 
 def laden(pfad: Path) -> None:
-    """Übernimmt einen vorhandenen Lauf, z.B. nach einem Neustart des Servers.
-    Ein schon begonnenes Gate 1 ergibt sich aus den Gate-Dateien daneben.
-    Ältere Läufe über alle Fälle bleiben ladbar (case=None)."""
+    """Übernimmt ein vorhandenes Ergebnis, z.B. nach einem Neustart des Servers,
+    damit nicht jeder Schritt neu laufen muss. Die Art erkennt die Funktion am
+    Inhalt, die vorangehenden Schritte lädt sie über die Verweise in den
+    Metadaten mit:
+
+    * Suche (results/relevance/)    → weiter mit "Zuordnen"
+    * Zuordnung (results/assignment/) → weiter in Gate 1 bzw. Schritt 5
+    * Paarvergleich (results/artifact/) → weiter in Gate 2
+    """
     pfad = Path(pfad).resolve()
     dokument = json.loads(pfad.read_text(encoding="utf-8"))
+    if dokument["meta"].get("step") == "relevance":
+        with _lock:
+            _search.clear()
+            _search.update(_suche_zustand(pfad, dokument))
+            _state.clear()
+            _state.update(running=False, records=[])
+    elif "responses" in dokument:
+        _paarvergleich_laden(pfad, dokument)
+    else:
+        _zuordnung_laden(pfad, dokument)
+
+
+def _suche_zustand(pfad: Path, dokument: dict[str, Any]) -> dict[str, Any]:
+    meta = dokument["meta"]
+    return dict(running=False, provider=meta["provider"], model=meta["model_requested"], case=meta["case_id"],
+                passages_file=meta["passages_file"], current=None,
+                records=[_ohne_aufrufe(r) for r in dokument["records"]], result=_anzeige(pfad),
+                result_path=str(pfad), evaluation=dokument.get("evaluation"), summary=dokument["summary"])
+
+
+def _zuordnung_laden(pfad: Path, dokument: dict[str, Any]) -> None:
+    """Ein schon begonnenes Gate 1 ergibt sich aus den Gate-Dateien daneben.
+    Ältere Läufe über alle Fälle bleiben ladbar (case=None)."""
     records = [_ohne_aufrufe(r) for r in dokument["records"]]
     eval_pfad = pfad.with_name(f"{pfad.stem}_eval.json")
     evaluation = json.loads(eval_pfad.read_text(encoding="utf-8"))["runs"] if eval_pfad.is_file() else []
@@ -248,11 +277,7 @@ def laden(pfad: Path) -> None:
     with _lock:
         _search.clear()
         if suche_pfad and suche_pfad.is_file():
-            s_dok = json.loads(suche_pfad.read_text(encoding="utf-8"))
-            _search.update(running=False, provider=s_dok["meta"]["provider"], model=s_dok["meta"]["model_requested"],
-                           case=s_dok["meta"]["case_id"], passages_file=s_dok["meta"]["passages_file"], current=None,
-                           records=[_ohne_aufrufe(r) for r in s_dok["records"]], result=_anzeige(suche_pfad),
-                           result_path=str(suche_pfad), evaluation=s_dok.get("evaluation"), summary=s_dok["summary"])
+            _search.update(_suche_zustand(suche_pfad, json.loads(suche_pfad.read_text(encoding="utf-8"))))
         _state.clear()
         _state.update(
             running=False, records=records, runs=dokument["meta"]["runs"], run=max(r["run"] for r in records),
@@ -261,6 +286,51 @@ def laden(pfad: Path) -> None:
             result=_anzeige(pfad), result_path=str(pfad), evaluation=evaluation,
             gate_run=min(gate_laeufe) if gate_laeufe else None,
         )
+
+
+def _paarvergleich_laden(pfad: Path, dokument: dict[str, Any]) -> None:
+    """Paarvergleich des Artefakts: über meta.gate1 die Gate-1-Dateien (Hash
+    geprüft), über deren source_file den Zuordnungslauf. Ein schon begonnenes
+    Gate 2 ergibt sich aus den Gate-2-Dateien daneben."""
+    meta = dokument["meta"]
+    if meta.get("statements_source") != "gate1" or not meta.get("gate1"):
+        raise ValueError(f"{pfad.name} ist ein Experimentlauf (Aussagen aus cases.yaml), "
+                         "kein Paarvergleich des Artefakts.")
+    gate_pfade = []
+    for quelle in meta["gate1"]:
+        gate = Path(quelle["path"])
+        gate = gate if gate.is_absolute() else ROOT / gate
+        if not gate.is_file():
+            raise ValueError(f"Gate-1-Datei {quelle['path']} fehlt.")
+        if sha256(gate) != quelle["sha256"]:
+            raise ValueError(f"Gate-1-Datei {quelle['path']} wurde nach dem Paarvergleich verändert.")
+        gate_pfade.append(gate)
+    zuordnungen = {gate.parent / json.loads(gate.read_text(encoding="utf-8"))["source_file"] for gate in gate_pfade}
+    if len(zuordnungen) != 1:
+        raise ValueError(f"Die Gate-1-Dateien stammen aus mehreren Zuordnungsläufen: {sorted(map(str, zuordnungen))}")
+    zuordnung = zuordnungen.pop()
+    _zuordnung_laden(zuordnung, json.loads(zuordnung.read_text(encoding="utf-8")))
+
+    builder, _ = builder_from_gate1(gate_pfade)
+    builder = replace(builder, justification=bool(meta.get("justification")), evidence=bool(meta.get("evidence")))
+    namen = builder.criteria_by_id()
+    responses = [{k: v for k, v in r.items() if k != "raw"} for r in dokument["responses"]]
+    gate2_laeufe = {int(p.name[len(pfad.stem) + 2:].split("_")[0]) for p in pfad.parent.glob(f"{pfad.stem}_r*_*_gate2.json")}
+    with _lock:
+        _state["step5"] = {
+            "running": False, "provider": meta["provider"], "model": meta["model"], "runs": meta["runs"], "pause": 0,
+            "condition": meta["condition"], "justification": builder.justification, "evidence": builder.evidence,
+            "run": max((r["run"] for r in responses), default=1), "current": None, "responses": responses,
+            "cases": [
+                {"id": c.id, "title": c.title,
+                 "statements": [[namen[cid].name, text] for cid, text in c.ordered_statements()]}
+                for c in builder.cases
+            ],
+            "names": {cid: k.name for cid, k in namen.items()},
+            "result": _anzeige(pfad), "result_path": str(pfad),
+        }
+        if gate2_laeufe:
+            _state["gate2_run"] = min(gate2_laeufe)
 
 
 # ------------------------------------------------------------------ Gate 1
@@ -638,7 +708,10 @@ class Handler(BaseHTTPRequestHandler):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="viewer.py", description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--load", type=Path, help="Vorhandenen Lauf laden (results/assignment/<lauf>.json)")
+    parser.add_argument("--load", type=Path,
+                        help="Vorhandenes Ergebnis laden und dort weitermachen: results/relevance/<suche>.json "
+                             "(weiter mit Zuordnen), results/assignment/<lauf>.json (Gate 1, Schritt 5) "
+                             "oder results/artifact/<lauf>.json (Gate 2)")
     args = parser.parse_args(argv)
     if args.load:
         laden(args.load)

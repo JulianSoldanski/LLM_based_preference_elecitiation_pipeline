@@ -22,6 +22,8 @@
   .bad-text { color: var(--bad); }
 
   form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 20px; }
+  #fehler { margin: -8px 0 16px; }
+  #fehler:empty { display: none; }
   input, select, button, textarea { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
   button { cursor: pointer; }
   #model { width: 220px; }
@@ -127,8 +129,8 @@
     <label class="muted">Passagen <select id="passagen"></select></label>
     <label class="muted">Pause <input id="pause" type="number" min="0" step="0.5" value="0.5"> s</label>
     <button class="primaer" id="start">Aussagen suchen</button>
-    <span id="fehler" class="bad-text"></span>
   </form>
+  <p id="fehler" class="bad-text"></p>
 
   <div class="schritte" id="schritte"></div>
   <div class="statuszeile"><span id="statustext" class="muted"></span><span class="laeufe" id="laeufe"></span></div>
@@ -163,6 +165,7 @@
   let formGeaendert = false; // Produkt/Datei von Hand geändert: dann nicht mehr der Suche folgen
   let ansicht = null;        // "zuordnung", "paarvergleich" oder "gate2"; null = automatisch
   let fall2 = null;          // in Gate 2 gewählter Fall
+  const g2Versucht = new Set(); // "run|fall": schon automatisch geöffnet (kein Wiederholen nach Fehler)
   let entwurf2 = {};         // Gate 2: { fall: { "a|b": {action, preference, intensity, reason} } } je Zyklus
   let partb = null;          // Teil B: Rohdaten der Lieferanten (einmal geladen)
   let lfFall = null, lfWahl = null, lfTab = "orders";
@@ -233,18 +236,20 @@
 
   // Eigener Dialog statt prompt(): Titel, Hinweis, ein Textfeld. Ergebnis ist der
   // Text oder null bei Abbrechen/Esc. Mit pflicht bleibt OK ohne Text gesperrt.
-  function fragen({ titel, zitat = "", text = "", wert = "", pflicht = false, platzhalter = "", ok = "OK" }) {
+  // Ohne textfeld ist es eine reine Bestätigung (Ergebnis "" statt null).
+  function fragen({ titel, zitat = "", text = "", wert = "", pflicht = false, platzhalter = "", ok = "OK", textfeld = true }) {
     const dialog = $("#dialog"), feld = $("#dialoggrund"), knopf = $("#dialogok");
     $("#dialogtitel").textContent = titel;
     $("#dialogzitat").textContent = zitat;
     $("#dialogtext").textContent = text;
-    feld.value = wert; feld.placeholder = platzhalter; knopf.textContent = ok;
-    const pruefen = () => { knopf.disabled = pflicht && !feld.value.trim(); };
+    feld.hidden = !textfeld;
+    feld.value = textfeld ? wert : ""; feld.placeholder = platzhalter; knopf.textContent = ok;
+    const pruefen = () => { knopf.disabled = textfeld && pflicht && !feld.value.trim(); };
     feld.oninput = pruefen; pruefen();
     feld.onkeydown = (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !knopf.disabled) dialog.close("ok"); };
     dialog.returnValue = "";
     dialog.showModal();
-    feld.focus();
+    (textfeld ? feld : knopf).focus();
     return new Promise((fertig) => {
       dialog.onclose = () => fertig(dialog.returnValue === "ok" ? feld.value.trim() : null);
     });
@@ -290,9 +295,10 @@
     const reviewer = $("#reviewer").value.trim();
     if (!reviewer) return fehler("Bitte zuerst ein Kürzel als Prüfer eintragen.");
     speicher.set("reviewer", reviewer);
-    // Die Begründung zur Fallentscheidung ist optional und wird erst hier erfragt.
+    // Bei continue nur bestätigen; sonst ist die Begründung optional und wird erst hier erfragt.
     const grund = await fragen({ titel: `Fall ${fall} mit „${decision}“ abschließen?`,
-      text: "Danach ist nichts mehr änderbar.", platzhalter: "Begründung zur Entscheidung (optional)", ok: decision });
+      text: "Danach ist nichts mehr änderbar.", platzhalter: "Begründung zur Entscheidung (optional)", ok: decision,
+      textfeld: decision !== "continue" });
     if (grund === null) return;
     const actions = Object.entries(entwurf[fall] ?? {}).filter(([, e]) => e.action).map(([passage_id, e]) => ({ passage_id, ...e }));
     try {
@@ -454,6 +460,9 @@
     $("#schritte").innerHTML = schritte.map(([n, k, a], i) =>
       (i ? '<span class="muted">→</span>' : "") +
       `<span class="schritt ${k}" ${klickbar(a) ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+    // Das Formular startet die Pipeline neu und gehört nur auf die erste Seite:
+    // sichtbar, solange es noch keine Zuordnung gibt.
+    $("#form").style.display = laufDaten() || ansicht === "lieferanten" ? "none" : "";
     $("#spalten").classList.toggle("lf", ansicht === "lieferanten");
     if (ansicht === "lieferanten") return zeichnenLieferanten();
     // Schritt 1, solange es noch keine Zuordnung gibt, oder auf Klick in der Schrittleiste.
@@ -498,7 +507,7 @@
         ${faelle().length > 1 ? `<div class="zeile"><span class="faelle">${tabs}</span></div>` : ""}
         ${!alleFertig ? "" : frei.length ? `
           <div class="zeile"><b>Weiter mit Schritt 5: Paarvergleich</b>
-            <span class="muted">${frei.length > 1 ? `${frei.length} freigegebene Fälle` : `Fall ${esc(frei[0])} freigegeben`} · Anbieter, Modell und Pause wie oben</span></div>
+            <span class="muted">${frei.length > 1 ? `${frei.length} freigegebene Fälle` : `Fall ${esc(frei[0])} freigegeben`} · Modell wie bei der Zuordnung: ${esc(st.provider)} ${esc(st.model)}</span></div>
           <div class="zeile">
             <label class="muted">Läufe <input id="runs5" type="number" min="1" value="1" style="width:64px"></label>
             <span class="muted" title="Spec 07: Passagen mit ID im Prompt, jedes Urteil nennt Begründung und Belegstellen.">mit Begründung und Belegstellen</span>
@@ -597,7 +606,7 @@
   async function paarvergleichStarten() {
     fehler();
     try {
-      st = await api("/api/step5/start", { provider: $("#provider").value, model: $("#model").value,
+      st = await api("/api/step5/start", { provider: st.provider, model: st.model,
         pause: Number($("#pause").value), runs: Number($("#runs5").value) });
       ansicht = "paarvergleich";
       abfragen();
@@ -678,15 +687,23 @@
     $("#laeufe").innerHTML = "";
     const zeichen = { done: (c) => (g2.cases[c].decision === "accept" ? " ✓" : " ■"), problem: () => " ⚠", invalid: () => " ✗", active: () => " •", open: () => "" };
     const tabs = faelle2.map((c) => `<button class="${c === fall2 ? "aktiv" : ""}" data-fall2="${esc(c)}">${esc(c)}${zeichen[g2.cases[c].state](c)}</button>`).join(" ");
+    // Ein offener Fall wird direkt geöffnet, mit dem Prüferkürzel aus Gate 1. Nur
+    // ohne Kürzel oder nach einem Fehler beim Öffnen bleibt der Knopf stehen.
+    const reviewer = speicher.get("reviewer"), schluessel = `${g2.run}|${fall2}`;
+    const automatisch = f?.state === "open" && reviewer && !g2Versucht.has(schluessel);
+    if (automatisch) {
+      g2Versucht.add(schluessel);
+      setTimeout(() => g2Api("/api/gate2/open", { run: g2.run, case_id: fall2, reviewer, repair: false }, "Gate 2 wird geöffnet …"));
+    }
     const fokus = $("#fokus");
     fokus.classList.remove("laeuft");
     fokus.innerHTML = `<div class="kopf">Gate 2: Paarvergleiche und Gewichte prüfen</div>
-      <span class="muted">Je Paar zuerst die Evidenz, dann der Vorschlag des Modells. Gewichte und CR rechnet der Code.</span>
-      <div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
-        ${faelle2.length > 1 ? `<span class="faelle">${tabs}</span>` : ""}</div>
-      ${f?.state === "open" ? `<div class="zeile">
-        <label class="muted" title="Spec 06, nur Demo: liegt CR über der Schwelle, gehen die Urteile vorab bis zu dreimal an den Agenten. In Evaluationsläufen aus."><input id="reparatur2" type="checkbox"> automatische CR-Reparatur vorab</label>
-        <button class="primaer" id="gate2oeffnen">Fall ${esc(fall2)} öffnen</button></div>` : ""}`;
+      <span class="muted">Je Paar zuerst die Evidenz, dann der Vorschlag des Modells. Gewichte und CR rechnet der Code.${
+        f?.state === "active" ? ` · Prüfer ${esc(f.reviewer)}` : ""}</span>
+      ${faelle2.length > 1 ? `<div class="zeile"><span class="faelle">${tabs}</span></div>` : ""}
+      ${f?.state !== "open" ? "" : automatisch ? `<div class="zeile muted">Fall ${esc(fall2)} wird geöffnet …</div>`
+        : `<div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(reviewer)}" placeholder="Kürzel" size="8"></label>
+           <button class="primaer" id="gate2oeffnen">Fall ${esc(fall2)} öffnen</button></div>`}`;
 
     $("#spalten").innerHTML = f?.state === "active" ? f.pairs.map((p) => g2Karte(f, p)).join("") : "";
     $("#legende").textContent = f?.state === "active"
@@ -954,9 +971,7 @@
       const reviewer = $("#reviewer").value.trim();
       if (!reviewer) return fehler("Bitte zuerst ein Kürzel als Prüfer eintragen.");
       speicher.set("reviewer", reviewer);
-      const reparatur = $("#reparatur2").checked;
-      return g2Api("/api/gate2/open", { run: st.gate2.run, case_id: fall2, reviewer, repair: reparatur },
-        reparatur ? "Reparatur läuft …" : "");
+      return g2Api("/api/gate2/open", { run: st.gate2.run, case_id: fall2, reviewer, repair: false });
     }
     const d = e.target.dataset?.fall;
     if (d) fallFertig(d) ? ((fall = d), (gewaehlt = null), zeichnen()) : oeffnen(d);
