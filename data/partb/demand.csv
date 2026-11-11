@@ -1,0 +1,4 @@
+component,annual_demand_units,max_defect_rate
+ketten,36000,0.02
+batteriepacks,22000,0.02
+konnektivitaetsmodule,18000,0.02

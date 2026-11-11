@@ -72,7 +72,48 @@
 
   .detail, .entscheidung { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 16px; }
   .detail p { margin: 0 0 10px; white-space: pre-wrap; }
+
+  /* Gate 1: Passage oben, Entscheidung als Leiste am unteren Rand */
+  .detail .zitat { margin: 8px 0 14px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 6px 6px 0; font-size: 15px; white-space: pre-wrap; }
+  .urteile { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .urteil { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .urteil .titel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .urteil .wert { font-weight: 600; font-size: 15px; margin: 2px 0 4px; }
+  .urteil .grund { color: var(--muted); font-size: 13px; }
+  .aktionen { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .aktionen .trenner { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  .mein { margin-top: 12px; padding: 8px 12px; border-radius: 6px; background: var(--edit-bg); color: var(--edit); }
+  .mein button { margin-left: 8px; padding: 2px 8px; font-size: 12px; }
+  .entscheidung.leiste { position: sticky; bottom: 0; z-index: 5; background: var(--bg); box-shadow: 0 -6px 16px rgba(0, 0, 0, .18); }
+
+  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; width: min(640px, calc(100vw - 32px)); box-sizing: border-box; background: var(--bg); color: var(--fg); }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog form { display: block; margin: 0; }
+  dialog h3 { margin: 0 0 4px; font-size: 16px; }
+  dialog p { margin: 0 0 12px; }
+  dialog .zitat { margin: 4px 0 12px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 6px 6px 0; font-size: 14px; white-space: pre-wrap; max-height: 40vh; overflow: auto; }
+  dialog .zitat:empty { display: none; }
+  dialog textarea { min-height: 84px; }
+  dialog .knoepfe { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   .legende { font-size: 12px; margin-top: 8px; }
+
+  /* Teil B: Lieferantendaten */
+  .spalten.lf { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .spalte[data-lsup] { cursor: pointer; }
+  .abschnitt { font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
+  .lzeile { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 4px; }
+  .strip { display: flex; flex-wrap: wrap; gap: 2px; }
+  .q { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+  .q.ok { background: var(--ok); }
+  .q.bad { background: var(--bad); }
+  .q.teil { background: var(--edit); }
+  .tabelle { overflow: auto; max-height: 440px; margin-top: 8px; }
+  table.daten { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.daten th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.daten td { padding: 3px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+  table.daten td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.daten td.bad { color: var(--bad); font-weight: 600; }
+  table.daten td.teil { color: var(--edit); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -82,10 +123,10 @@
   <form id="form">
     <select id="provider"><option>openai</option><option>anthropic</option><option>mistral</option></select>
     <input id="model" value="gpt-4o-2024-08-06" placeholder="Modell-ID" required>
-    <label class="muted">Fall <select id="fall"></select></label>
-    <label class="muted">Läufe <input id="runs" type="number" min="1" value="1"></label>
-    <label class="muted">Pause <input id="pause" type="number" min="0" step="0.5" value="2"> s</label>
-    <button class="primaer" id="start">Start</button>
+    <label class="muted">Produkt <select id="fall"></select></label>
+    <label class="muted">Passagen <select id="passagen"></select></label>
+    <label class="muted">Pause <input id="pause" type="number" min="0" step="0.5" value="0.5"> s</label>
+    <button class="primaer" id="start">Aussagen suchen</button>
     <span id="fehler" class="bad-text"></span>
   </form>
 
@@ -94,9 +135,18 @@
   <div class="fokus" id="fokus"></div>
   <div class="spalten" id="spalten"></div>
   <p class="legende muted" id="legende"></p>
-  <div id="entscheidung"></div>
   <div id="detail"></div>
+  <div id="entscheidung"></div>
 </main>
+<dialog id="dialog">
+  <form method="dialog">
+    <h3 id="dialogtitel"></h3>
+    <div id="dialogzitat" class="zitat"></div>
+    <p id="dialogtext" class="muted"></p>
+    <textarea id="dialoggrund"></textarea>
+    <div class="knoepfe"><button value="abbrechen" formnovalidate>Abbrechen</button><button class="primaer" value="ok" id="dialogok">OK</button></div>
+  </form>
+</dialog>
 <script>
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -110,10 +160,12 @@
   let timer = null;
   let fall = null;           // in Gate 1 geöffneter Fall
   let entwurf = {};          // Gate 1: { fall: { passage_id: {action, new_criterion, reason, timestamp} } }
-  let entscheidungsgrund = "";
+  let formGeaendert = false; // Produkt/Datei von Hand geändert: dann nicht mehr der Suche folgen
   let ansicht = null;        // "zuordnung", "paarvergleich" oder "gate2"; null = automatisch
   let fall2 = null;          // in Gate 2 gewählter Fall
   let entwurf2 = {};         // Gate 2: { fall: { "a|b": {action, preference, intensity, reason} } } je Zyklus
+  let partb = null;          // Teil B: Rohdaten der Lieferanten (einmal geladen)
+  let lfFall = null, lfWahl = null, lfTab = "orders";
 
   async function api(pfad, body) {
     const antwort = await fetch(pfad, body ? { method: "POST", body: JSON.stringify(body) } : undefined);
@@ -123,23 +175,41 @@
   }
   function fehler(e) { $("#fehler").textContent = e ? e.message ?? e : ""; }
 
-  const passage = (pid) => basis.passages.find((p) => p.passage_id === pid);
+  // Passagendatei: vor dem Start die im Formular gewählte, danach die des Laufs.
+  const laufDaten = () => st.running || st.result || st.error;
+  // Schritt 1: die Suche gehört zum Formular, solange Produkt und Datei dazu passen.
+  const suche = () => st.search ?? null;
+  const sucheAktuell = () => !!suche() && (suche().running
+    || (suche().case === $("#fall").value && suche().passages_file === $("#passagen").value));
+  const aktuelleDatei = () => (laufDaten() ? st.passages_file : sucheAktuell() ? suche().passages_file : $("#passagen").value);
+  const passagen = () => basis.passages[aktuelleDatei()] ?? basis.passages[basis.default_passages] ?? [];
+  const produktName = (id) => (basis.cases.find((c) => c.id === id)?.title ?? id).replace(/^Fall \d+: /, "");
+  // Was "Aussagen suchen" gefunden hat (für die Zuordnung dieses Laufs).
+  const gefunden = () => (suche()?.records ?? []).filter((r) => r.relevant === true).map((r) => passage(r.passage_id)).filter(Boolean);
+  // Erwartung je Passage im Fall des Laufs: Passagen anderer Produkte sind für ihn keine Evidenz.
+  const erwartetFuer = (p, fallId) => (p.expected_criteria == null ? null : p.doc_id === fallId ? p.expected_criteria : []);
+  const passage = (pid) => passagen().find((p) => p.passage_id === pid);
   const herkunft = (p) => (p.case ? `${p.case.replace(/^Fall \d+: /, "")} · ${p.statement}` : "");
-  const ergebnis = (r) => (r.status !== "ok" ? "failed" : r.criteria.join(", ") || "none");
+  // relevant === false: vom Relevanzfilter aussortiert, nicht zugeordnet und nicht in Gate 1.
+  const aussortiert = (r) => r.relevant === false;
+  const ergebnis = (r) => (aussortiert(r) ? "nicht relevant" : r.status !== "ok" ? "failed" : r.criteria.join(", ") || "none");
   const codes = () => basis.criteria.map((c) => c.id);
   // Die Pipeline bearbeitet einen Fall: vor dem Start der im Formular gewählte,
   // danach der des Laufs (null bei älteren Läufen über alle Fälle).
-  const aktiverFall = () => (st.running || st.result || st.error ? st.case : $("#fall").value);
-  const fallPassagen = () => basis.passages.filter((p) => !aktiverFall() || p.doc_id === aktiverFall());
+  const aktiverFall = () => (laufDaten() ? st.case : $("#fall").value);
+  const fallPassagen = () => passagen().filter((p) => !aktiverFall() || p.doc_id === aktiverFall());
+  // Zuordnung: mit Suche genau die gefundenen Aussagen, sonst (ältere Läufe) die des Falls.
+  const zuordnungsPassagen = () => (suche()?.result && laufDaten() && suche().case === st.case ? gefunden() : fallPassagen());
 
   // ---------------------------------------------------------------- Gate 1
 
   const gateModus = () => !st.running && !!st.result && !st.error;
   const gateRun = () => st.gate1?.run ?? angezeigt ?? st.run ?? 1;
-  const faelle = () => [...new Set(basis.passages.map((p) => p.doc_id))]
+  const faelle = () => [...new Set(passagen().map((p) => p.doc_id))]
     .filter((d) => st.records.some((r) => r.run === gateRun() && r.doc_id === d));
   const fallFertig = (d) => st.gate1?.cases?.[d];
-  const recordsVon = (d) => st.records.filter((r) => r.run === gateRun() && r.doc_id === d).sort((a, b) => a.position - b.position);
+  const recordsVon = (d) => st.records.filter((r) => r.run === gateRun() && r.doc_id === d && !aussortiert(r))
+    .sort((a, b) => a.position - b.position);
   // Wie gate1.assignments_from_records: failed kommt als "none" ins Gate
   const agent = (r) => (r.status === "ok" ? r.criteria[0] ?? "none" : "none");
 
@@ -151,14 +221,51 @@
     return { ...e, ziel: e.action === "delete" ? "geloescht" : e.action === "reassign" ? e.new_criterion : agent(r) };
   }
 
-  function setzen(pid, action, new_criterion = null) {
+  function setzen(pid, action, new_criterion = null, reason = null) {
     if (!fall || fallFertig(fall)) return;
     const r = recordsVon(fall).find((x) => x.passage_id === pid);
     if (action === "reassign" && new_criterion === agent(r)) action = "confirm";
     const alt = entwurf[fall]?.[pid] ?? {};
     (entwurf[fall] ??= {})[pid] = { action, new_criterion: action === "reassign" ? new_criterion : null,
-      reason: alt.reason ?? "", timestamp: new Date().toISOString() };
+      reason: reason ?? alt.reason ?? "", timestamp: new Date().toISOString() };
     zeichnen();
+  }
+
+  // Eigener Dialog statt prompt(): Titel, Hinweis, ein Textfeld. Ergebnis ist der
+  // Text oder null bei Abbrechen/Esc. Mit pflicht bleibt OK ohne Text gesperrt.
+  function fragen({ titel, zitat = "", text = "", wert = "", pflicht = false, platzhalter = "", ok = "OK" }) {
+    const dialog = $("#dialog"), feld = $("#dialoggrund"), knopf = $("#dialogok");
+    $("#dialogtitel").textContent = titel;
+    $("#dialogzitat").textContent = zitat;
+    $("#dialogtext").textContent = text;
+    feld.value = wert; feld.placeholder = platzhalter; knopf.textContent = ok;
+    const pruefen = () => { knopf.disabled = pflicht && !feld.value.trim(); };
+    feld.oninput = pruefen; pruefen();
+    feld.onkeydown = (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !knopf.disabled) dialog.close("ok"); };
+    dialog.returnValue = "";
+    dialog.showModal();
+    feld.focus();
+    return new Promise((fertig) => {
+      dialog.onclose = () => fertig(dialog.returnValue === "ok" ? feld.value.trim() : null);
+    });
+  }
+
+  // Löschen und Neu zuordnen nur mit Begründung: erst fragen, dann setzen.
+  async function handeln(pid, action, ziel = null) {
+    if (!fall || fallFertig(fall)) return;
+    const r = recordsVon(fall).find((x) => x.passage_id === pid);
+    if (!r) return;
+    if (action === "confirm" || (action === "reassign" && ziel === agent(r))) return setzen(pid, "confirm");
+    const alt = entwurf[fall]?.[pid];
+    const gleich = alt?.action === action && (action === "delete" || alt.new_criterion === ziel);
+    const grund = await fragen({
+      titel: action === "delete" ? `${pid} löschen` : `${pid}: ${agent(r)} → ${ziel}`,
+      zitat: r.text,
+      text: action === "delete" ? "Warum fällt die Passage raus?" : `Warum ${ziel} statt ${agent(r)}?`,
+      wert: gleich ? alt.reason : "", pflicht: true, platzhalter: "Begründung (Pflicht)",
+      ok: action === "delete" ? "Löschen" : "Neu zuordnen",
+    });
+    if (grund !== null) setzen(pid, action, ziel, grund);
   }
 
   function pruefen(d) {
@@ -183,13 +290,15 @@
     const reviewer = $("#reviewer").value.trim();
     if (!reviewer) return fehler("Bitte zuerst ein Kürzel als Prüfer eintragen.");
     speicher.set("reviewer", reviewer);
-    if (!confirm(`Fall ${fall} mit „${decision}“ abschließen? Danach ist nichts mehr änderbar.`)) return;
+    // Die Begründung zur Fallentscheidung ist optional und wird erst hier erfragt.
+    const grund = await fragen({ titel: `Fall ${fall} mit „${decision}“ abschließen?`,
+      text: "Danach ist nichts mehr änderbar.", platzhalter: "Begründung zur Entscheidung (optional)", ok: decision });
+    if (grund === null) return;
     const actions = Object.entries(entwurf[fall] ?? {}).filter(([, e]) => e.action).map(([passage_id, e]) => ({ passage_id, ...e }));
     try {
       st = await api("/api/gate1/close", { run: gateRun(), case_id: fall, reviewer, decision,
-        decision_reason: entscheidungsgrund, actions });
+        decision_reason: grund, actions });
       fehler();
-      entscheidungsgrund = "";
       const naechster = faelle().find((d) => !fallFertig(d));
       gewaehlt = null;
       if (naechster) return oeffnen(naechster);
@@ -214,11 +323,14 @@
     const spalten = [{ code: "offen", titel: "Offen", karten: [] }]
       .concat(basis.criteria.map((c) => ({ code: c.id, titel: `${c.id} <span>${esc(c.name)}</span>`, karten: [] })))
       .concat([{ code: "none", titel: "none <span>kein Kriterium</span>", karten: [] }]);
+    const irrelevant = { code: "irrelevant", titel: "Nicht relevant <span>Filter, nicht in Gate 1</span>", karten: [] };
     const failed = { code: "failed", titel: "Failed", karten: [] };
-    for (const p of fallPassagen()) {
-      const r = fertig.get(p.passage_id), erwartet = p.expected_criteria;
+    for (const p of zuordnungsPassagen()) {
+      const r = fertig.get(p.passage_id), erwartet = erwartetFuer(p, st.case ?? p.doc_id);
       if (!r) {
         spalten[0].karten.push(karte(p.passage_id, "offen", st.current === p.passage_id && run === st.run ? "jetzt" : ""));
+      } else if (aussortiert(r)) {
+        irrelevant.karten.push(karte(p.passage_id, "irrelevant", erwartet == null ? "" : erwartet.length ? "bad" : "ok"));
       } else if (r.status !== "ok") {
         failed.karten.push(karte(p.passage_id, "failed", "bad"));
       } else {
@@ -227,6 +339,7 @@
         spalten.find((s) => s.code === code).karten.push(karte(p.passage_id, code, klasse));
       }
     }
+    if (st.records.some((r) => r.relevant != null) || irrelevant.karten.length) spalten.push(irrelevant);
     if (failed.karten.length) spalten.push(failed);
     return spalten;
   }
@@ -246,28 +359,114 @@
     return spalten;
   }
 
+  // ---------------------------------------------------- Schritt 1: Aussagen suchen
+
+  function spaltenSuche() {
+    const s = sucheAktuell() ? suche() : null, fallId = s?.case ?? $("#fall").value;
+    const fertig = new Map((s?.records ?? []).map((r) => [r.passage_id, r]));
+    const offen = { code: "offen", titel: "Offen", karten: [] };
+    const treffer = { code: "gefunden", titel: `Gefunden <span>Aussagen zu ${esc(produktName(fallId))}</span>`, karten: [] };
+    const nicht = { code: "nicht", titel: "Nicht relevant <span>bleibt draußen</span>", karten: [] };
+    const failed = { code: "failed", titel: "Failed", karten: [] };
+    for (const p of passagen()) {
+      const r = fertig.get(p.passage_id), soll = erwartetFuer(p, fallId);
+      const zusatz = p.doc_id !== fallId ? ` <span class="muted">· ${esc(produktName(p.doc_id))}</span>` : "";
+      if (!r) offen.karten.push(karte(p.passage_id, "offen", s?.current === p.passage_id ? "jetzt" : "", false, zusatz));
+      else if (r.status !== "ok") failed.karten.push(karte(p.passage_id, "failed", "bad", false, zusatz));
+      else {
+        const klasse = soll == null ? "" : (r.relevant === (soll.length > 0)) ? "ok" : "bad";
+        (r.relevant ? treffer : nicht).karten.push(karte(p.passage_id, r.relevant ? "gefunden" : "nicht", klasse, false, zusatz));
+      }
+    }
+    return [offen, treffer, nicht, failed].filter((sp) => sp.karten.length || sp.code === "gefunden" || (sp.code === "offen" && !s?.result));
+  }
+
+  function zeichnenSuche() {
+    const s = sucheAktuell() ? suche() : null, fallId = s?.case ?? $("#fall").value, n = passagen().length;
+    const geprueft = s?.records.length ?? 0, sum = s?.summary, ev = s?.evaluation;
+    let text = "Bereit. Produkt und Passagendatei wählen, dann „Aussagen suchen“.";
+    if (s?.running) text = `Aussagen suchen · ${geprueft} von ${n} Passagen geprüft · ${esc(s.provider)} ${esc(s.model)}`;
+    else if (s?.error) text = `<span class="bad-text">Suche abgebrochen: ${esc(s.error)}</span>`;
+    else if (s?.result) text = `Suche fertig · ${esc(s.result)}`;
+    $("#statustext").innerHTML = text;
+    $("#laeufe").innerHTML = "";
+
+    const fokus = $("#fokus");
+    fokus.classList.toggle("laeuft", !!s?.current);
+    if (s?.current) {
+      const p = passage(s.current);
+      fokus.innerHTML = `<div class="kopf">Wird geprüft: ${esc(p.passage_id)} <span class="muted">${esc(produktName(p.doc_id))} · Position ${p.position}</span></div>${esc(p.text)}`;
+    } else if (s?.result) {
+      const zuordnung = st.running || st.result;
+      fokus.innerHTML = `<div class="kopf">${sum.found} von ${sum.total} Passagen sind Aussagen zu ${esc(produktName(fallId))}</div>
+        <span class="muted">${sum.not_relevant} nicht relevant${sum.failed ? ` · ${sum.failed} failed` : ""}${ev
+          ? ` · gegen Ground Truth: Recall ${zahl(ev.recall, 2)}, Precision ${zahl(ev.precision, 2)}${ev.missed.length ? `, übersehen: ${esc(ev.missed.join(", "))}` : ""}` : ""}</span>
+        <div class="zeile">${zuordnung
+          ? `<span class="muted">Zuordnung ${st.running ? "läuft" : "ist fertig"}.</span><button data-ansicht-ziel="zuordnung">Zur Zuordnung</button>`
+          : `<b>Schritt 2: Zuordnen</b><span class="muted">nur die ${sum.found} gefundenen Aussagen · Anbieter, Modell und Pause wie oben</span>
+             <label class="muted">Läufe <input id="runs" type="number" min="1" value="1" style="width:64px"></label>
+             <button class="primaer" id="zuordnen" ${sum.found ? "" : "disabled"}>Zuordnen</button>`}</div>`;
+    } else {
+      fokus.innerHTML = `<div class="kopf">Schritt 1: Aussagen suchen</div><span class="muted">Durchsucht werden alle ${n} Passagen aus ${esc(aktuelleDatei())}, über alle Produkte hinweg, nach bewertenden Aussagen zu <b>${esc(produktName(fallId))}</b>. Was nicht gefunden wird, wird nicht zugeordnet.</span>`;
+    }
+
+    $("#spalten").innerHTML = spaltenSuche().map((sp) =>
+      `<div class="spalte" data-code="${sp.code}"><h2>${sp.titel} <span>${sp.karten.length || ""}</span></h2>${sp.karten.join("")}</div>`).join("");
+    $("#legende").textContent = "Grün: wie erwartet (Aussage zu diesem Produkt gefunden bzw. Ablenker verworfen) · Rot: abweichend · grau hinter der ID: Passage eines anderen Produkts · Karte anklicken für die Begründung";
+    $("#entscheidung").innerHTML = "";
+    detailSuche();
+  }
+
+  function detailSuche() {
+    const p = gewaehlt && passage(gewaehlt);
+    if (!p) return ($("#detail").innerHTML = "");
+    const r = (sucheAktuell() ? suche().records : []).find((x) => x.passage_id === p.passage_id);
+    const wert = !r ? "noch nicht geprüft" : r.status !== "ok" ? "failed" : r.relevant ? "gefunden" : "nicht relevant";
+    $("#detail").innerHTML = `<div class="detail"><p><b>${esc(p.passage_id)}</b> <span class="muted">${esc(produktName(p.doc_id))} · Position ${p.position}${p.statement ? ` · Fragebogen: ${esc(p.statement)}` : ""}</span></p>
+      <div class="zitat">${esc(p.text)}</div>
+      <div class="urteile"><div class="urteil"><div class="titel">Aussagen suchen</div><div class="wert">${esc(wert)}</div>
+        <div class="grund">${esc(r ? r.justification ?? r.errors.join("; ") : "")}</div></div></div></div>`;
+  }
+
+  // In der Schrittleiste anklickbar: Suche, sobald es eine gibt; Zuordnung, sobald sie läuft;
+  // die späteren Schritte wie bisher erst mit gestartetem Paarvergleich.
+  function klickbar(a) {
+    if (a === "lieferanten") return true;
+    if (a === "suche") return !!suche() && laufDaten();
+    if (a === "zuordnung") return laufDaten() && (ansicht === "suche" || !!st.step5);
+    return !!(st.step5 && a && (a !== "gate2" || st.gate2));
+  }
+
   function zeichnen() {
     const laufend = st.running, gate = gateModus();
-    $("#start").disabled = $("#fall").disabled = laufend || !!st.step5?.running;
+    $("#start").disabled = $("#fall").disabled = $("#passagen").disabled = laufend || !!st.step5?.running || !!suche()?.running;
     const alleFertig = gate && st.gate1 && faelle().every(fallFertig);
 
     const schritte = [
-      ["Passagen", st.records.length || laufend ? "fertig" : ""],
-      ["Zuordnung", laufend ? "aktiv" : st.result ? "fertig" : ""],
+      ["Aussagen suchen", suche()?.running || (!suche()?.result && !laufDaten()) ? "aktiv" : suche()?.result ? "fertig" : "", "suche"],
+      ["Zuordnung", laufend ? "aktiv" : st.result ? "fertig" : "", "zuordnung"],
       ["Gate 1", alleFertig ? "fertig" : gate ? "aktiv" : "", "zuordnung"],
       ["Paarvergleich", st.step5?.running ? "aktiv" : st.step5?.result ? "fertig" : "", "paarvergleich"],
       ["Gate 2", !st.gate2 ? "" : Object.values(st.gate2.cases).every((c) => ["done", "invalid"].includes(c.state)) ? "fertig" : "aktiv", "gate2"],
+      ["Teil B: Lieferanten", ansicht === "lieferanten" ? "aktiv" : "", "lieferanten"],
     ];
     // Mit gestartetem Paarvergleich lässt sich über die Schrittleiste zurück zum Gate wechseln.
     $("#schritte").innerHTML = schritte.map(([n, k, a], i) =>
       (i ? '<span class="muted">→</span>' : "") +
-      `<span class="schritt ${k}" ${st.step5 && a && (a !== "gate2" || st.gate2) ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+      `<span class="schritt ${k}" ${klickbar(a) ? `data-ansicht="${a}"` : ""}>${k === "fertig" ? "✓ " : ""}${n}</span>`).join("");
+    $("#spalten").classList.toggle("lf", ansicht === "lieferanten");
+    if (ansicht === "lieferanten") return zeichnenLieferanten();
+    // Schritt 1, solange es noch keine Zuordnung gibt, oder auf Klick in der Schrittleiste.
+    if (ansicht === "suche" || !laufDaten()) return zeichnenSuche();
     if (st.step5 && ansicht === "gate2" && st.gate2) return zeichnenGate2();
     if (st.step5 && ansicht !== "zuordnung") return zeichnenPaarvergleich();
 
-    const n = fallPassagen().length;
-    let text = "Bereit. Anbieter, Modell und Fall wählen, dann Start.";
-    if (laufend) text = `Lauf ${st.run}/${st.runs} · ${st.records.filter((r) => r.run === st.run).length} von ${n} Passagen zugeordnet · ${esc(st.provider)} ${esc(st.model)}`;
+    const n = zuordnungsPassagen().length;
+    let text = "";
+    if (laufend) {
+      const lauf = st.records.filter((r) => r.run === st.run);
+      text = `Zuordnung · Lauf ${st.run}/${st.runs} · ${lauf.length} von ${n} gefundenen Aussagen zugeordnet · ${esc(st.provider)} ${esc(st.model)}`;
+    }
     else if (st.error) text = `<span class="bad-text">Abgebrochen: ${esc(st.error)}</span>`;
     else if (st.result) {
       const ev = st.evaluation || [];
@@ -296,24 +495,22 @@
       }).join(" ");
       const frei = faelle().filter((d) => fallFertig(d)?.decision === "continue");
       fokus.innerHTML = `<div class="kopf">Gate 1 · Lauf ${gateRun()} · Fall ${esc(fall ?? faelle()[0])}</div>
-        <div class="zeile"><label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
-        ${faelle().length > 1 ? `<span class="faelle">${tabs}</span>` : ""}</div>
+        ${faelle().length > 1 ? `<div class="zeile"><span class="faelle">${tabs}</span></div>` : ""}
         ${!alleFertig ? "" : frei.length ? `
           <div class="zeile"><b>Weiter mit Schritt 5: Paarvergleich</b>
             <span class="muted">${frei.length > 1 ? `${frei.length} freigegebene Fälle` : `Fall ${esc(frei[0])} freigegeben`} · Anbieter, Modell und Pause wie oben</span></div>
           <div class="zeile">
             <label class="muted">Läufe <input id="runs5" type="number" min="1" value="1" style="width:64px"></label>
-            <label class="muted" title="Das Modell begründet jeden Paarvergleich. Ändert den Prompt; Ergebnis in eigener Datei."><input id="begruendung5" type="checkbox"> mit Begründung</label>
-            <label class="muted" title="Spec 07: Passagen mit ID im Prompt, jedes Urteil nennt seine Belegstellen (schließt die Begründung ein). Ergebnis in eigener Datei."><input id="belege5" type="checkbox"> mit Belegstellen</label>
+            <span class="muted" title="Spec 07: Passagen mit ID im Prompt, jedes Urteil nennt Begründung und Belegstellen.">mit Begründung und Belegstellen</span>
             <button class="primaer" id="paarvergleich" ${st.step5?.running ? "disabled" : ""}>Paarvergleich starten</button></div>`
           : '<div class="zeile">Gate 1 abgeschlossen ohne continue, an Schritt 5 geht nichts.</div>'}`;
     } else if (st.current && run === st.run) {
       const p = passage(st.current);
       fokus.innerHTML = `<div class="kopf">Wird zugeordnet: ${esc(p.passage_id)} <span class="muted">${esc(herkunft(p))}</span></div>${esc(p.text)}`;
     } else if (letzte) {
-      fokus.innerHTML = `<div class="kopf">Zuletzt: ${esc(letzte.passage_id)} → ${esc(ergebnis(letzte))}</div><span class="muted">${esc(letzte.justification ?? letzte.errors.join("; "))}</span>`;
+      fokus.innerHTML = `<div class="kopf">Zuletzt: ${esc(letzte.passage_id)} → ${esc(ergebnis(letzte))}</div><span class="muted">${esc(letzte.justification ?? letzte.relevance_justification ?? letzte.errors.join("; "))}</span>`;
     } else {
-      fokus.innerHTML = `<span class="muted">${n} Passagen von Fall ${esc(aktiverFall())} warten · Katalog ${esc(basis.criteria_file)}</span>`;
+      fokus.innerHTML = `<span class="muted">${n} gefundene Aussagen warten · Katalog ${esc(basis.criteria_file)}</span>`;
     }
 
     // Spalten
@@ -352,10 +549,11 @@
       p.ohneEvidenz.length ? `<span class="bad-text">Kriterien ohne Evidenz: ${p.ohneEvidenz.join(", ")}</span>` : "",
     ].filter(Boolean).join(" · ");
     const weiterGeht = !p.offen.length && !p.ohneGrund.length && !p.ohneEvidenz.length;
-    $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Entscheidung für Fall ${esc(fall)}</b><br><span class="muted">${hinweise}</span>
+    $("#entscheidung").innerHTML = `<div class="entscheidung leiste"><b>Entscheidung für Fall ${esc(fall)}</b><br><span class="muted">${hinweise}</span>
       <div class="zeile">${p.offen.length ? `<button id="restbestaetigen">Übrige ${p.offen.length} bestätigen</button>` : ""}
-        <input id="entscheidungsgrund" value="${esc(entscheidungsgrund)}" placeholder="Begründung zur Entscheidung (optional)" style="flex:1; min-width:200px">
-        <button class="primaer" data-decision="continue" ${weiterGeht ? "" : "disabled"} title="${weiterGeht ? "" : "Erst jede Passage bearbeiten, alle Begründungen eintragen und jedes Kriterium belegen"}">continue</button>
+        <span style="flex:1"></span>
+        <label class="muted">Prüfer <input id="reviewer" value="${esc(speicher.get("reviewer"))}" placeholder="Kürzel" size="8"></label>
+        <button class="primaer" data-decision="continue" ${weiterGeht ? "" : "disabled"} title="${weiterGeht ? "" : "Erst jede Passage bearbeiten und jedes Kriterium belegen"}">continue</button>
         <button data-decision="need_more_input" ${p.ohneGrund.length ? "disabled" : ""}>need_more_input</button></div></div>`;
   }
 
@@ -364,25 +562,34 @@
     const pid = gewaehlt, p = passage(pid);
     const r = st.records.find((x) => x.run === (gateModus() ? gateRun() : angezeigt ?? st.run) && x.passage_id === pid);
     if (!r) return ($("#detail").innerHTML = `<div class="detail"><p><b>${esc(pid)}</b></p><p>${esc(p.text)}</p><p class="muted">Noch nicht zugeordnet.</p></div>`);
-    const kopf = `<p><b>${esc(pid)}</b> <span class="muted">${esc(herkunft(p))} · Dokument ${esc(p.doc_id)}, Position ${p.position}</span></p><p>${esc(p.text)}</p>`;
-    const begruendung = `<p><b>Agent:</b> ${esc(gateModus() && st.gate1 ? agent(r) : ergebnis(r))}<br><span class="muted">${esc(r.justification ?? "Zuordnung fehlgeschlagen: " + r.errors.join("; "))}</span></p>`;
+    const kopf = `<p><b>${esc(pid)}</b> <span class="muted">${esc(herkunft(p))} · Dokument ${esc(p.doc_id)}, Position ${p.position}</span></p><div class="zitat">${esc(p.text)}</div>`;
+    const inGate = gateModus() && st.gate1;
+    const urteil = (titel, wert, grund) => `<div class="urteil"><div class="titel">${titel}</div><div class="wert">${esc(wert)}</div><div class="grund">${esc(grund)}</div></div>`;
+    const urteile = `<div class="urteile">
+      ${(() => { const t = suche()?.records.find((x) => x.passage_id === pid);
+        return t ? urteil("Aussagen suchen", t.relevant ? "gefunden" : "nicht relevant", t.justification) : ""; })()}
+      ${aussortiert(r) ? "" : urteil("Zuordnung des Agenten", inGate ? agent(r) : ergebnis(r), r.justification ?? "Zuordnung fehlgeschlagen: " + r.errors.join("; "))}
+      ${inGate || erwartetFuer(p, st.case ?? p.doc_id) == null ? "" : urteil("Erwartet", erwartetFuer(p, st.case ?? p.doc_id).join(", ") || "none", p.doc_id !== (st.case ?? p.doc_id) ? `Passage gehört zu ${produktName(p.doc_id)}` : "")}
+    </div>`;
 
-    if (!(gateModus() && st.gate1)) {
-      const erwartet = p.expected_criteria == null ? "–" : p.expected_criteria.join(", ") || "none";
-      $("#detail").innerHTML = `<div class="detail">${kopf}${begruendung}<p><b>Erwartet:</b> ${esc(erwartet)}</p></div>`;
+    if (!inGate) {
+      $("#detail").innerHTML = `<div class="detail">${kopf}${urteile}</div>`;
       return;
     }
     const z = zustand(r.doc_id, r), gesperrt = !!fallFertig(r.doc_id) || r.doc_id !== fall;
     const ziele = [...codes(), "none"].filter((c) => c !== agent(r));
-    $("#detail").innerHTML = `<div class="detail">${kopf}${begruendung}
-      <div class="zeile">
-        <button data-aktion="confirm" class="${z.action === "confirm" ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>Bestätigen</button>
-        <button data-aktion="delete" class="${z.action === "delete" ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>Löschen</button>
-        <span>Neu zuordnen:</span>${ziele.map((c) =>
-          `<button data-aktion="reassign" data-ziel="${c}" class="${z.action === "reassign" && z.ziel === c ? "aktiv" : ""}" ${gesperrt ? "disabled" : ""}>${c}</button>`).join("")}
-      </div>
-      <p style="margin-top:10px"><b>Begründung</b> <span class="muted">(Pflicht bei Löschen und Neu zuordnen)</span><br>
-        <textarea id="grund" ${gesperrt ? "disabled" : ""}>${esc(z.reason)}</textarea></p></div>`;
+    const aus = gesperrt ? "disabled" : "";
+    const mein = z.action === "delete" || z.action === "reassign"
+      ? `<div class="mein"><b>${z.action === "delete" ? "Gelöscht" : `Neu: ${esc(z.ziel)} statt ${esc(agent(r))}`}</b> · ${esc(z.reason)}
+          ${gesperrt ? "" : `<button data-aktion="${z.action}" ${z.action === "reassign" ? `data-ziel="${esc(z.ziel)}"` : ""}>Begründung ändern</button>`}</div>`
+      : "";
+    $("#detail").innerHTML = `<div class="detail">${kopf}${urteile}
+      <div class="aktionen">
+        <button data-aktion="confirm" class="${z.action === "confirm" ? "aktiv" : ""}" ${aus}>✓ Bestätigen</button>
+        <button data-aktion="delete" class="${z.action === "delete" ? "aktiv" : ""}" ${aus}>Löschen</button>
+        <span class="trenner"></span><span class="muted">Neu zuordnen</span>${ziele.map((c) =>
+          `<button data-aktion="reassign" data-ziel="${c}" class="${z.action === "reassign" && z.ziel === c ? "aktiv" : ""}" ${aus}>${c}</button>`).join("")}
+      </div>${mein}</div>`;
   }
 
   // -------------------------------------------------- Schritt 5: Paarvergleich
@@ -391,8 +598,7 @@
     fehler();
     try {
       st = await api("/api/step5/start", { provider: $("#provider").value, model: $("#model").value,
-        pause: Number($("#pause").value), runs: Number($("#runs5").value),
-        justification: $("#begruendung5").checked, evidence: $("#belege5").checked });
+        pause: Number($("#pause").value), runs: Number($("#runs5").value) });
       ansicht = "paarvergleich";
       abfragen();
     } catch (e) { fehler(e); }
@@ -555,16 +761,156 @@
     zeichnen();
   }
 
+  // ------------------------------------------------------- Teil B: Lieferanten
+  // Nur lesend. Zeigt die Rohdaten aus data/partb/, keine Kennzahlen.
+
+  const zahl = (x, d = 0) => (x == null ? "–" : Number(x).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const eur = (x) => (x == null ? "–" : `${zahl(x, 2)} €`);
+  const datum = (s) => (s ? s.split("-").reverse().join(".") : "–");
+  const DE = {
+    volume_up: "Menge +", volume_down: "Menge −", variant_switch: "Variantenwechsel", revision_change: "Änderungsstand",
+    accepted: "angenommen", partial: "teilweise", rejected: "abgelehnt",
+    incoming_inspection: "Wareneingang", field_warranty: "Gewährleistung (Feld)", return: "Rückläufer",
+    out_of_spec: "außerhalb Spezifikation", damaged: "beschädigt", wrong_configuration: "falsche Ausführung",
+    late_asn: "Lieferavis zu spät", invoice_mismatch: "Rechnung abweichend", missing_certificate: "Zertifikat fehlt",
+    missing_delivery_note: "Lieferschein fehlt", edi: "EDI", email: "E-Mail/PDF",
+  };
+  const de = (s) => (s == null ? "–" : DE[s] ?? s);
+  const strip = (liste, klasse, titel) =>
+    `<span class="strip">${liste.map((x) => `<i class="q ${klasse(x)}" title="${esc(titel(x))}"></i>`).join("")}</span>`;
+  const fallTitel = (id) => (basis.cases.find((c) => c.id === id)?.title ?? id).replace(/^Fall \d+: /, "");
+
+  // Gewichte des Falls aus Gate 2. Teil B nutzt nur Gewichte, die vor dem
+  // Lieferantenvergleich feststehen (R11): Gate 2 mit accept abgeschlossen.
+  function gewichteTeilB(id) {
+    const g = st.gate2?.cases?.[id];
+    if (g?.state === "done" && g.decision === "accept") {
+      const ev = g.final.evaluation, name = (c) => st.step5?.names?.[c] ?? c;
+      const liste = Object.entries(ev.weights).map(([c, w]) => `${esc(name(c))} ${w.toFixed(3)}`).join(" · ");
+      return `<span><b>Gewichte aus Gate 2</b> (Lauf ${st.gate2.run}, accept): ${liste}
+        <span class="muted">· CR ${ev.cr.toFixed(3)} (Schwelle ${ev.cr_threshold})</span></span>`;
+    }
+    if (g?.state === "done") return `<span class="muted">Gate 2 mit ${esc(g.decision)} abgeschlossen: für diesen Fall gibt es keine Gewichte.</span>`;
+    return `<span class="muted">Gewichte stehen noch nicht fest: ${g ? "Gate 2 für diesen Fall ist noch offen." : "kein Durchlauf bis Gate 2 für diesen Fall."}</span>`;
+  }
+
+  function zeichnenLieferanten() {
+    $("#laeufe").innerHTML = "";
+    $("#entscheidung").innerHTML = "";
+    if (!partb) {
+      $("#statustext").innerHTML = "Teil B · Lieferantendaten werden geladen …";
+      $("#fokus").innerHTML = $("#spalten").innerHTML = $("#legende").textContent = $("#detail").innerHTML = "";
+      api("/api/partb").then((d) => { partb = d; zeichnen(); })
+        .catch((e) => { partb = { available: false, error: e.message ?? String(e) }; zeichnen(); });
+      return;
+    }
+    if (partb.error) {  // meist: Server läuft noch mit altem Stand und kennt /api/partb nicht
+      $("#statustext").innerHTML = `<span class="bad-text">Lieferantendaten nicht abrufbar: ${esc(partb.error)}</span>`;
+      $("#fokus").innerHTML = `<div class="kopf">Teil B: Server neu starten</div>
+        <span class="muted">Der laufende Viewer-Server kennt diese Ansicht noch nicht. Im Terminal mit Ctrl+C beenden,
+        <code>python3 src/viewer.py</code> neu starten und die Seite neu laden.</span>
+        <div class="zeile"><button id="lfzurueck">← zurück zur Pipeline</button></div>`;
+      $("#spalten").innerHTML = $("#legende").textContent = $("#detail").innerHTML = "";
+      return;
+    }
+    if (!partb.available) {
+      $("#statustext").innerHTML = `<span class="bad-text">Keine Lieferantendaten in ${esc(partb.dir)}</span>`;
+      $("#fokus").innerHTML = `<div class="kopf">Teil B: Lieferantendaten fehlen</div>
+        <span class="muted">Fehlend: ${esc(partb.missing.join(", "))}. Erzeugen mit <code>python3 scripts/generate_partb_data.py</code>.</span>
+        <div class="zeile"><button id="lfzurueck">← zurück zur Pipeline</button></div>`;
+      $("#spalten").innerHTML = $("#legende").textContent = $("#detail").innerHTML = "";
+      return;
+    }
+    const ids = Object.keys(partb.components);
+    if (!ids.includes(lfFall)) lfFall = ids.includes(aktiverFall()) ? aktiverFall() : ids[0];
+    const komp = partb.components[lfFall], sups = komp.suppliers;
+    if (!sups.some((s) => s.supplier_id === lfWahl)) lfWahl = sups[0].supplier_id;
+    const dem = komp.demand ?? {}, zr = partb.period;
+
+    $("#statustext").innerHTML = `Teil B · Rohdaten der Lieferanten · ${esc(partb.dir)} · synthetisch, angelehnt an Wang et al. (2004)`;
+    $("#fokus").classList.remove("laeuft");
+    $("#fokus").innerHTML = `<div class="kopf">Lieferantendaten · ${esc(fallTitel(lfFall))}</div>
+      <div class="zeile"><span class="faelle">${ids.map((id) =>
+        `<button class="${id === lfFall ? "aktiv" : ""}" data-lfall="${esc(id)}">${esc(fallTitel(id))}</button>`).join(" ")}</span>
+        <button id="lfzurueck">← zurück zur Pipeline</button></div>
+      <div class="zeile muted">Bedarf nächste Periode ${zahl(dem.annual_demand_units)} Stück · max. Fehlerquote ${zahl((dem.max_defect_rate ?? 0) * 100)} %
+        ${zr ? ` · Historie ${datum(zr.start)} bis ${datum(zr.end)}` : ""}</div>
+      <div class="zeile">${gewichteTeilB(lfFall)}</div>
+      <div class="muted" style="margin-top:6px">Rohdaten wie im ERP, noch keine Kennzahlen.</div>`;
+
+    $("#spalten").innerHTML = sups.map((s) => {
+      const k = s.conditions ?? {}, c = s.counts, n = c.orders, o = s.orders;
+      const zeile = (label, feld, ok) => `<div class="lzeile"><span>${label}</span>${strip(o, (x) => (x[feld] ? "ok" : "bad"),
+        (x) => `${x.po_id} · ${datum(x.receipt_date)}`)}<span class="muted">${ok}/${n}</span></div>`;
+      const ch = s.changes;
+      return `<div class="spalte ${s.supplier_id === lfWahl ? "jetzt" : ""}" data-lsup="${esc(s.supplier_id)}">
+        <h2>${esc(s.supplier_name)} <span>${esc(s.supplier_id)}</span></h2>
+        <table>
+          <tr><td>Stückpreis</td><td><b>${eur(k.unit_price_eur)}</b></td></tr>
+          <tr><td>Fracht je Lieferung</td><td>${eur(k.freight_eur_per_shipment)}</td></tr>
+          <tr><td>Lieferzeit (Zusage)</td><td>${zahl(k.quoted_lead_time_days)} Tage</td></tr>
+          <tr><td>Mindestmenge</td><td>${zahl(k.moq)} Stück</td></tr>
+          <tr><td>Kapazität</td><td>${zahl(k.capacity_units_per_year)} Stück/Jahr</td></tr>
+          <tr><td>Bestellkanal</td><td>${esc(de(s.order_channel))}</td></tr>
+        </table>
+        <div class="abschnitt">Lieferungen (${n}) · ${zahl(c.qty_received)} Stück</div>
+        ${zeile("pünktlich", "on_time", n - c.late)}
+        ${zeile("vollständig", "in_full", n - c.short)}
+        ${zeile("Dokumente", "docs", n - c.docs_bad)}
+        ${zeile("ohne Befund", "condition", n - c.rejected_orders)}
+        <div class="abschnitt">Änderungsanfragen (${ch.length})</div>
+        <div class="lzeile"><span>Antwort</span>${strip(ch, (x) => ({ accepted: "ok", partial: "teil", rejected: "bad" })[x.response],
+          (x) => `${x.cr_id} · ${de(x.change_type)} · ${de(x.response)}`)}<span class="muted">${c.changes.accepted}/${ch.length}</span></div>
+        <div class="abschnitt">Reklamationen (${s.claims.length}) · ${zahl(c.claim_units)} Stück</div>
+        <div class="muted" style="font-size:12px">Wareneingang ${c.claims.incoming_inspection} · Feld ${c.claims.field_warranty} · Rückläufer ${c.claims.return}</div>
+      </div>`;
+    }).join("");
+    $("#legende").textContent = "Jedes Kästchen ist eine Bestellung bzw. Anfrage, zeitlich geordnet · grün erfüllt · rot nicht erfüllt · gelb teilweise · Lieferant anklicken für die Einzeldaten unten.";
+
+    const s = sups.find((x) => x.supplier_id === lfWahl);
+    const reiter = [["orders", `Bestellungen (${s.orders.length})`], ["changes", `Änderungsanfragen (${s.changes.length})`],
+                    ["claims", `Reklamationen (${s.claims.length})`]]
+      .map(([id, t]) => `<button class="${lfTab === id ? "aktiv" : ""}" data-ltab="${id}">${t}</button>`).join(" ");
+    const tabelle = (kopf, zeilen) => `<div class="tabelle"><table class="daten"><tr>${kopf.map((h) => `<th>${h}</th>`).join("")}</tr>${zeilen.join("")}</table></div>`;
+    const td = (v, klasse = "") => `<td class="${klasse}">${v}</td>`;
+    let inhalt, datei;
+    if (lfTab === "changes") {
+      datei = "change_requests.csv";
+      inhalt = tabelle(["Anfrage", "angefragt", "Art", "Änderung", "gebraucht bis", "Antwort", "umgesetzt am", "umgesetzt"],
+        s.changes.map((x) => `<tr>${td(esc(x.cr_id))}${td(datum(x.request_date))}${td(esc(de(x.change_type)))}
+          ${td(x.change_pct == null ? "–" : `${x.change_pct} %`, "num")}${td(datum(x.requested_by_date))}
+          ${td(esc(de(x.response)), { rejected: "bad", partial: "teil" }[x.response] ?? "")}
+          ${td(datum(x.fulfilled_date), x.fulfilled_date && x.fulfilled_date > x.requested_by_date ? "bad" : "")}
+          ${td(x.fulfilled_pct == null ? "–" : `${x.fulfilled_pct} %`, "num")}</tr>`));
+    } else if (lfTab === "claims") {
+      datei = "claims.csv";
+      inhalt = tabelle(["Reklamation", "Datum", "Art", "Bestellung", "Grund", "Stück", "Bearbeitungskosten"],
+        s.claims.map((x) => `<tr>${td(esc(x.claim_id))}${td(datum(x.claim_date))}${td(esc(de(x.claim_type)))}${td(esc(x.po_id))}
+          ${td(esc(x.reason ? de(x.reason) : ""))}${td(zahl(x.qty_affected), "num")}${td(eur(x.handling_cost_eur), "num")}</tr>`));
+    } else {
+      datei = "purchase_orders.csv";
+      inhalt = tabelle(["Bestellung", "bestellt", "Menge", "Preis", "zugesagt", "Wareneingang", "geliefert", "abgelehnt", "Grund", "Dokumente", "Fracht"],
+        s.orders.map((x) => `<tr>${td(esc(x.po_id))}${td(datum(x.order_date))}${td(zahl(x.qty_ordered), "num")}${td(eur(x.unit_price_eur), "num")}
+          ${td(datum(x.commit_date))}${td(datum(x.receipt_date), x.on_time ? "" : "bad")}${td(zahl(x.qty_received), x.in_full ? "num" : "num bad")}
+          ${td(zahl(x.qty_rejected), x.qty_rejected ? "num bad" : "num")}${td(esc(x.rejection_reason ? de(x.rejection_reason) : ""))}
+          ${td(x.docs ? "ok" : esc(de(x.doc_issue)), x.docs ? "" : "bad")}${td(eur(x.freight_eur), "num")}</tr>`));
+    }
+    $("#detail").innerHTML = `<div class="detail"><div class="kopf"><b>${esc(s.supplier_name)}</b> <span class="muted">· Einzeldaten aus ${esc(partb.dir)}/${datei}</span></div>
+      <div class="zeile">${reiter}</div>${inhalt}
+      <p class="legende muted">Rot: Termin verfehlt, Menge unvollständig, Befund oder Dokumentenfehler · bei Änderungsanfragen rot: später umgesetzt als gebraucht.</p></div>`;
+  }
+
   // ------------------------------------------------------------------ Abfrage
 
   async function abfragen() {
     try {
       st = await api("/api/status");
     } catch (e) { fehler(e); }
+    if (st.search && !formGeaendert) { $("#fall").value = st.search.case; $("#passagen").value = st.search.passages_file; }
     if (gateModus() && st.gate1 && !fall) fall = faelle().find((d) => !fallFertig(d)) ?? faelle()[0];
     zeichnen();
     clearTimeout(timer);
-    if (st.running || st.step5?.running) timer = setTimeout(abfragen, 500);
+    if (st.running || st.step5?.running || st.search?.running) timer = setTimeout(abfragen, 500);
   }
 
   // ----------------------------------------------------------------- Ereignisse
@@ -575,15 +921,31 @@
     if (offen && !confirm("Gate 1 ist noch nicht abgeschlossen. Trotzdem einen neuen Lauf starten?")) return;
     fehler();
     speicher.set("fall", $("#fall").value);
+    speicher.set("passagen", $("#passagen").value);
     try {
-      st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value, case: $("#fall").value,
-        runs: Number($("#runs").value), pause: Number($("#pause").value) });
+      formGeaendert = false;
+      st = await api("/api/search/start", { provider: $("#provider").value, model: $("#model").value, case: $("#fall").value,
+        passages: $("#passagen").value, pause: Number($("#pause").value) });
       angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
       abfragen();
     } catch (err) { fehler(err); }
   };
 
+  async function zuordnen() {
+    fehler();
+    try {
+      st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value,
+        runs: Number($("#runs").value), pause: Number($("#pause").value) });
+      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
+      abfragen();
+    } catch (err) { fehler(err); }
+  }
+
   $("#fokus").onclick = (e) => {
+    if (e.target.id === "zuordnen" && !e.target.disabled) return zuordnen();
+    if (e.target.dataset?.ansichtZiel) { ansicht = e.target.dataset.ansichtZiel; gewaehlt = null; return zeichnen(); }
+    if (e.target.id === "lfzurueck") { ansicht = null; if (partb?.error) partb = null; fehler(); return zeichnen(); }
+    if (e.target.dataset?.lfall) { lfFall = e.target.dataset.lfall; lfWahl = null; return zeichnen(); }
     if (e.target.id === "gatestart") return oeffnen(faelle()[0]);
     if (e.target.id === "paarvergleich") return paarvergleichStarten();
     if (e.target.id === "gate2start") { ansicht = "gate2"; return zeichnen(); }
@@ -600,10 +962,13 @@
     if (d) fallFertig(d) ? ((fall = d), (gewaehlt = null), zeichnen()) : oeffnen(d);
   };
   // Vor dem Start zeigen die Spalten die Passagen des gewählten Falls.
-  $("#fall").onchange = () => { speicher.set("fall", $("#fall").value); zeichnen(); };
+  $("#fall").onchange = () => { formGeaendert = true; speicher.set("fall", $("#fall").value); zeichnen(); };
+  $("#passagen").onchange = () => { formGeaendert = true; speicher.set("passagen", $("#passagen").value); zeichnen(); };
   $("#fokus").onchange = (e) => { if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim()); };
 
   $("#spalten").onclick = (e) => {
+    const lieferant = e.target.closest("[data-lsup]");
+    if (lieferant && ansicht === "lieferanten") { lfWahl = lieferant.dataset.lsup; return zeichnen(); }
     const knopf = e.target.closest("[data-g2aktion]");
     if (knopf && !knopf.disabled) {
       const eintrag = ((entwurf2[fall2] ??= {})[knopf.dataset.paar] ??= {});
@@ -644,23 +1009,20 @@
     if (!spalte || !pid) return;
     const code = spalte.dataset.code;
     gewaehlt = pid;
-    if (code === "geloescht") setzen(pid, "delete");
-    else setzen(pid, "reassign", code);  // zurück in die Ursprungsspalte = confirm
+    zeichnen();
+    if (code === "geloescht") handeln(pid, "delete");
+    else handeln(pid, "reassign", code);  // zurück in die Ursprungsspalte = confirm
   };
 
   $("#detail").onclick = (e) => {
+    const reiter = e.target.closest("[data-ltab]");
+    if (reiter && ansicht === "lieferanten") { lfTab = reiter.dataset.ltab; return zeichnen(); }
     const b = e.target.closest("[data-aktion]");
-    if (b && !b.disabled) setzen(gewaehlt, b.dataset.aktion, b.dataset.ziel ?? null);
-  };
-  $("#detail").oninput = (e) => {
-    if (e.target.id !== "grund" || !fall) return;
-    const r = recordsVon(fall).find((x) => x.passage_id === gewaehlt);
-    if (!entwurf[fall]?.[gewaehlt]) (entwurf[fall] ??= {})[gewaehlt] = { action: null, new_criterion: null, reason: "", timestamp: null };
-    entwurf[fall][gewaehlt].reason = e.target.value;
-    if (r) entscheidung();
+    if (!b || b.disabled) return;
+    handeln(gewaehlt, b.dataset.aktion, b.dataset.ziel ?? null);
   };
 
-  $("#entscheidung").oninput = (e) => { if (e.target.id === "entscheidungsgrund") entscheidungsgrund = e.target.value; };
+  $("#entscheidung").oninput = (e) => { if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim()); };
   $("#entscheidung").onclick = (e) => {
     if (st.step5 && ansicht === "gate2" && st.gate2) {
       const f = g2Fall();
@@ -689,7 +1051,7 @@
 
   $("#schritte").onclick = (e) => {
     const a = e.target.closest("[data-ansicht]")?.dataset.ansicht;
-    if (a) { ansicht = a; zeichnen(); }
+    if (a) { ansicht = a; gewaehlt = null; zeichnen(); }
   };
   $("#laeufe").onclick = (e) => {
     const r = e.target.dataset.run;
@@ -699,8 +1061,12 @@
   (async () => {
     try {
       basis = await api("/api/basis");
-      $("#fall").innerHTML = basis.cases.map((c) => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join("");
+      $("#fall").innerHTML = basis.cases.map((c) => `<option value="${esc(c.id)}">${esc(produktName(c.id))}</option>`).join("");
       if (basis.cases.some((c) => c.id === speicher.get("fall"))) $("#fall").value = speicher.get("fall");
+      const dateien = Object.keys(basis.passages);
+      $("#passagen").innerHTML = dateien.map((d) =>
+        `<option value="${esc(d)}">${esc(d.replace(/^passages_|\.csv$/g, ""))} (${basis.passages[d].length})</option>`).join("");
+      $("#passagen").value = [speicher.get("passagen"), "passages_hidden.csv", basis.default_passages].find((d) => dateien.includes(d));
       abfragen();
     } catch (e) { fehler(e); }
   })();

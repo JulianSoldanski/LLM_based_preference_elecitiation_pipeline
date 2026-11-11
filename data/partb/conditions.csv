@@ -1,0 +1,10 @@
+supplier_id,component,unit_price_eur,freight_eur_per_shipment,quoted_lead_time_days,moq,capacity_units_per_year,valid_from,valid_to
+KET-A,ketten,6.40,360.00,42,500,14400,2026-11-01,2027-10-31
+KET-B,ketten,10.40,84.00,10,200,25200,2026-11-01,2027-10-31
+KET-C,ketten,8.00,120.00,21,300,21600,2026-11-01,2027-10-31
+BAT-A,batteriepacks,264.00,660.00,42,240,8800,2026-11-01,2027-10-31
+BAT-B,batteriepacks,429.00,154.00,10,90,26400,2026-11-01,2027-10-31
+BAT-C,batteriepacks,330.00,220.00,21,150,17600,2026-11-01,2027-10-31
+KON-A,konnektivitaetsmodule,33.60,180.00,42,130,10800,2026-11-01,2027-10-31
+KON-B,konnektivitaetsmodule,54.60,42.00,10,50,14400,2026-11-01,2027-10-31
+KON-C,konnektivitaetsmodule,42.00,60.00,21,80,10800,2026-11-01,2027-10-31

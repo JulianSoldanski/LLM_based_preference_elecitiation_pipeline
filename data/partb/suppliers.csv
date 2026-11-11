@@ -1,0 +1,10 @@
+supplier_id,supplier_name,component,order_channel
+KET-A,Ketten-Lieferant A,ketten,email
+KET-B,Ketten-Lieferant B,ketten,edi
+KET-C,Ketten-Lieferant C,ketten,edi
+BAT-A,Batteriepacks-Lieferant A,batteriepacks,email
+BAT-B,Batteriepacks-Lieferant B,batteriepacks,edi
+BAT-C,Batteriepacks-Lieferant C,batteriepacks,edi
+KON-A,Konnektivitätsmodule-Lieferant A,konnektivitaetsmodule,email
+KON-B,Konnektivitätsmodule-Lieferant B,konnektivitaetsmodule,edi
+KON-C,Konnektivitätsmodule-Lieferant C,konnektivitaetsmodule,edi

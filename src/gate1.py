@@ -81,9 +81,13 @@ class Gate1Result:
 
 def assignments_from_records(records: Iterable[dict[str, Any]]) -> list[Assignment]:
     """Übersetzt Datensätze aus assignment.py. Eine fehlgeschlagene Zuordnung
-    kommt als "none" ins Gate, mit den Fehlern als Begründung."""
+    kommt als "none" ins Gate, mit den Fehlern als Begründung. Was der
+    frühere Relevanzfilter in der Zuordnung aussortiert hat ("relevant": false,
+    nur in Läufen vom 07.11.2026), kommt nicht ins Gate."""
     ergebnis = []
     for r in records:
+        if r.get("relevant") is False:
+            continue
         if "doc_id" not in r or "position" not in r:
             raise GateError(f"{r['passage_id']}: doc_id/position fehlen (Lauf vor assignment_v2?)")
         if r["status"] == STATUS_OK:

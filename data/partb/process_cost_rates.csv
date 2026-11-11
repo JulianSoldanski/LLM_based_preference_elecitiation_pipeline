@@ -1,0 +1,7 @@
+activity,channel,cost_eur
+po_processing,edi,12.0
+po_processing,email,48.0
+goods_receipt,any,22.0
+invoice_check,edi,6.0
+invoice_check,email,18.0
+doc_correction,any,35.0

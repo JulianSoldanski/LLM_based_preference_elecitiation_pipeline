@@ -2,11 +2,13 @@
 
     python3 src/viewer.py            # dann http://127.0.0.1:8000 öffnen
 
-Nur Standardbibliothek. Die Pipeline bearbeitet genau einen Fall: "Start"
-ruft run_assignment() für die Passagen des gewählten Falls in einem Hintergrund-
-Thread auf; die Seite fragt den Zustand zweimal je Sekunde ab und zeigt, welche
-Passage gerade zugeordnet wird und in welcher Kriterienspalte sie landet.
-Ergebnis- und Logdatei entstehen wie bei der CLI in results/assignment/.
+Nur Standardbibliothek. Die Pipeline bearbeitet genau ein Produkt (Fall).
+Schritt 1 "Aussagen suchen" ruft relevance.run_search() über alle Passagen der
+gewählten Datei auf; Ergebnis in results/relevance/. Danach ruft "Zuordnen"
+run_assignment() nur für die gefundenen Aussagen auf; Ergebnis wie bei der CLI
+in results/assignment/. Beides läuft in einem Hintergrund-Thread; die Seite
+fragt den Zustand zweimal je Sekunde ab und zeigt, welche Passage gerade dran
+ist und wo sie landet.
 
 Nach dem Lauf folgt Gate 1 auf derselben Seite, über genau einen Lauf. Die Regeln liegen in gate1.apply_gate1(), gespeichert wird mit
 gate1_cli.speichern(): dieselben eingefrorenen Dateien und dasselbe
@@ -22,6 +24,10 @@ Danach folgt Gate 2 über einen Lauf aus Schritt 5. Die Regeln liegen
 in gate2.Gate2Session, gespeichert wird mit gate2_cli.speichern(): dieselben
 eingefrorenen Dateien und dasselbe Ereignislog wie bei der CLI. Revisionen
 ruft die Seite mit demselben Modell wie Schritt 5 auf.
+
+Als letzter Schritt zeigt die Seite die Rohdaten der Lieferanten für Teil B
+(partb_data.load_partb(), nur lesend). Er steht bewusst hinter Gate 2: Die
+Gewichte werden festgelegt, bevor Lieferanten verglichen werden (R11).
 """
 
 from __future__ import annotations
@@ -42,9 +48,11 @@ from agent import LLMClient, build_client
 from experiment import run_experiment
 from assignment import CRITERIA_FILE, PASSAGES_FILE, load_criteria, load_passages, run_assignment
 from assignment_eval import evaluate_file
+from relevance import OUT_DIR as SEARCH_DIR, run_search
 from gate1 import SUPERVISED, Action, Actions, GateError, apply_gate1, assignments_from_records
 from gate2 import Gate2Session, JudgmentAction
 import ahp
+import partb_data
 import gate2_cli
 import ledger
 from gate1_cli import abschlussstand, builder_from_gate1, events_pfad, gate_pfad, speichern
@@ -57,30 +65,42 @@ from schema import CONDITION_STATELESS, Response
 ARTIFACT_SUBDIR = "artifact"
 
 PAGE = Path(__file__).with_name("viewer.html")
+# Wählbare Passagendateien: alle data/passages_*.csv, z.B. die Evaluation
+# (nur die 9 Aussagen) und hidden (Aussagen zwischen Ablenkern).
+PASSAGES_DIR = PASSAGES_FILE.parent
 PROVIDERS = ("openai", "anthropic", "mistral")
 
 # Zustand des laufenden bzw. letzten Durchlaufs. Ein Durchlauf zur Zeit.
 _lock = threading.Lock()
 _state: dict[str, Any] = {"running": False, "records": []}
+# Schritt 1 "Aussagen suchen": eigener Zustand, überlebt den Start der Zuordnung.
+_search: dict[str, Any] = {}
+
+
+def passagendateien() -> dict[str, Path]:
+    return {p.name: p for p in sorted(PASSAGES_DIR.glob("passages_*.csv"))}
 
 
 def basis() -> dict[str, Any]:
-    """Kriterienkatalog, Passagen, zu jeder Passage der Fall, aus dem sie stammt,
-    und die wählbaren Fälle (doc_id der Passagen)."""
+    """Kriterienkatalog, Passagen je Datei, zu jeder Passage die Aussage des
+    Fragebogens, falls sie eine ist, und die wählbaren Fälle (doc_id)."""
     criteria = load_criteria(CRITERIA_FILE)
     cases = PromptBuilder.from_paths().cases
     herkunft = {
-        text: {"case": case.title, "statement": key}
+        text.strip(): {"case": case.title, "statement": key}
         for case in cases
         for key, text in case.statements.items()
     }
     titel = {case.id: case.title for case in cases}
-    passages = load_passages(PASSAGES_FILE, [c.id for c in criteria])
+    dateien = {name: load_passages(pfad, [c.id for c in criteria]) for name, pfad in passagendateien().items()}
+    alle = [p for passages in dateien.values() for p in passages]
     return {
         "criteria_file": CRITERIA_FILE.name,
         "criteria": [asdict(c) for c in criteria],
-        "passages": [{**p, **herkunft.get(p["text"], {})} for p in passages],
-        "cases": [{"id": d, "title": titel.get(d, d)} for d in dict.fromkeys(p["doc_id"] for p in passages)],
+        "passages": {name: [{**p, **herkunft.get(p["text"].strip(), {})} for p in passages]
+                     for name, passages in dateien.items()},
+        "default_passages": PASSAGES_FILE.name,
+        "cases": [{"id": d, "title": titel.get(d, d)} for d in dict.fromkeys(p["doc_id"] for p in alle)],
     }
 
 
@@ -90,30 +110,91 @@ def status() -> dict[str, Any]:
         if schritt5:
             schritt5 = {**schritt5, "responses": list(schritt5["responses"])}
         rest = {k: v for k, v in _state.items() if k != "gate2_sessions"}
+        suche = {**_search, "records": list(_search.get("records", []))} if _search else None
         return {**rest, "records": list(_state["records"]), "gate1": _gate_status(), "step5": schritt5,
-                "gate2": _gate2_status()}
+                "gate2": _gate2_status(), "search": suche}
+
+
+def _laeuft_etwas() -> bool:
+    return bool(_state["running"] or (_state.get("step5") or {}).get("running") or _search.get("running"))
+
+
+def suchen(params: dict[str, Any]) -> dict[str, Any]:
+    """Schritt 1: alle Passagen der Datei für das Produkt des Falls prüfen.
+    Eine neue Suche beginnt die Pipeline neu (die alte Zuordnung wird ausgeblendet)."""
+    provider = params.get("provider")
+    model = (params.get("model") or "").strip()
+    pause = float(params.get("pause") or 0)
+    case = params.get("case")
+    datei = params.get("passages") or PASSAGES_FILE.name
+    if provider not in PROVIDERS or not model or pause < 0:
+        raise ValueError("Anbieter, Modell und eine Pause ab 0 s angeben.")
+    with _lock:
+        if _laeuft_etwas():
+            raise ValueError("Es läuft bereits ein Durchlauf.")
+        dateien = passagendateien()
+        if datei not in dateien:
+            raise ValueError(f"Passagendatei {datei!r} gibt es nicht, bekannt: {sorted(dateien)}")
+        faelle = sorted({p["doc_id"] for p in basis()["passages"][datei]})
+        if case not in faelle:
+            raise ValueError(f"Bitte ein Produkt wählen, in {datei} bekannt: {faelle}")
+        client = build_client(provider, model)
+        _search.clear()
+        _search.update(running=True, provider=provider, model=model, pause=pause, case=case,
+                       passages_file=datei, current=None, records=[])
+        _state.clear()
+        _state.update(running=False, records=[])
+    threading.Thread(target=_suche, args=(client, case, dateien[datei]), daemon=True).start()
+    return status()
+
+
+def _suche_fortschritt(passage: dict[str, Any], record: dict[str, Any] | None) -> None:
+    with _lock:
+        _search["current"] = None if record else passage["passage_id"]
+        if record:
+            _search["records"].append(_ohne_aufrufe(record))
+        pause = _search["pause"] if record else 0
+    time.sleep(pause)
+
+
+def _suche(client: LLMClient, case: str, passagen: Path) -> None:
+    try:
+        json_path, _ = run_search(client, case_id=case, passages_path=passagen, quiet=True,
+                                  progress=_suche_fortschritt, out_dir=SEARCH_DIR)
+        dokument = json.loads(json_path.read_text(encoding="utf-8"))
+        with _lock:
+            _search.update(result=_anzeige(json_path), result_path=str(json_path),
+                           evaluation=dokument.get("evaluation"), summary=dokument["summary"])
+    except Exception as exc:
+        with _lock:
+            _search["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        with _lock:
+            _search.update(running=False, current=None)
 
 
 def starten(params: dict[str, Any]) -> dict[str, Any]:
+    """Schritt 3: ordnet die in Schritt 1 gefundenen Aussagen zu. Fall und
+    Passagendatei kommen aus der Suche."""
     provider = params.get("provider")
     model = (params.get("model") or "").strip()
     runs = int(params.get("runs") or 1)
     pause = float(params.get("pause") or 0)
-    case = params.get("case")
     if provider not in PROVIDERS or not model or runs < 1 or pause < 0:
         raise ValueError("Anbieter, Modell, mindestens 1 Lauf und eine Pause ab 0 s angeben.")
     with _lock:
-        if _state["running"] or (_state.get("step5") or {}).get("running"):
+        if _laeuft_etwas():
             raise ValueError("Es läuft bereits ein Durchlauf.")
-        faelle = [c["id"] for c in basis()["cases"]]
-        if case not in faelle:
-            raise ValueError(f"Bitte einen Fall wählen, bekannt: {faelle}")
-        # Fehlender API-Schlüssel fällt hier auf, bevor der Thread startet.
+        if not _search.get("result_path"):
+            raise ValueError("Erst Aussagen suchen, dann zuordnen.")
+        if not _search["summary"]["found"]:
+            raise ValueError("Die Suche hat keine Aussagen gefunden, es gibt nichts zuzuordnen.")
+        case, datei, suche = _search["case"], _search["passages_file"], Path(_search["result_path"])
         client = build_client(provider, model)
         _state.clear()
-        _state.update(running=True, provider=provider, model=model, runs=runs, pause=pause, case=case, run=1,
-                      current=None, records=[])
-    threading.Thread(target=_durchlauf, args=(client, runs, case), daemon=True).start()
+        _state.update(running=True, provider=provider, model=model, runs=runs, pause=pause, case=case,
+                      passages_file=datei, run=1, current=None, records=[])
+    threading.Thread(target=_durchlauf, args=(client, runs, suche), daemon=True).start()
     return status()
 
 
@@ -124,16 +205,21 @@ def _fortschritt(run: int, passage: dict[str, Any], record: dict[str, Any] | Non
             _state["current"] = passage["passage_id"]
         else:
             _state["current"] = None
-            _state["records"].append({k: v for k, v in record.items() if k != "calls"})
+            _state["records"].append(_ohne_aufrufe(record))
         pause = _state["pause"] if record else 0
     # Nur für die Anzeige: nach jeder Zuordnung kurz stehen bleiben, damit man
     # mitlesen kann. Außerhalb des Locks, sonst blockiert die Statusabfrage.
     time.sleep(pause)
 
 
-def _durchlauf(client: LLMClient, runs: int, case: str) -> None:
+def _ohne_aufrufe(record: dict[str, Any]) -> dict[str, Any]:
+    """Datensatz ohne Rohantworten (bleiben in der Ergebnisdatei)."""
+    return {k: v for k, v in record.items() if k != "calls"}
+
+
+def _durchlauf(client: LLMClient, runs: int, suche: Path) -> None:
     try:
-        json_path, _ = run_assignment(client, runs=runs, quiet=True, doc_id=case, progress=_fortschritt)
+        json_path, _ = run_assignment(client, search_path=suche, runs=runs, quiet=True, progress=_fortschritt)
         eval_path, _ = evaluate_file(json_path)
         evaluation = json.loads(eval_path.read_text(encoding="utf-8"))["runs"] if eval_path else []
         with _lock:
@@ -152,16 +238,25 @@ def laden(pfad: Path) -> None:
     Ältere Läufe über alle Fälle bleiben ladbar (case=None)."""
     pfad = Path(pfad).resolve()
     dokument = json.loads(pfad.read_text(encoding="utf-8"))
-    records = [{k: v for k, v in r.items() if k != "calls"} for r in dokument["records"]]
+    records = [_ohne_aufrufe(r) for r in dokument["records"]]
     eval_pfad = pfad.with_name(f"{pfad.stem}_eval.json")
     evaluation = json.loads(eval_pfad.read_text(encoding="utf-8"))["runs"] if eval_pfad.is_file() else []
     gate_laeufe = {int(p.name[len(pfad.stem) + 2:].split("_")[0]) for p in pfad.parent.glob(f"{pfad.stem}_r*_*_gate1.json")}
     faelle = {r["doc_id"] for r in records}
+    suche = dokument["meta"].get("search_file")
+    suche_pfad = SEARCH_DIR / suche if suche else None
     with _lock:
+        _search.clear()
+        if suche_pfad and suche_pfad.is_file():
+            s_dok = json.loads(suche_pfad.read_text(encoding="utf-8"))
+            _search.update(running=False, provider=s_dok["meta"]["provider"], model=s_dok["meta"]["model_requested"],
+                           case=s_dok["meta"]["case_id"], passages_file=s_dok["meta"]["passages_file"], current=None,
+                           records=[_ohne_aufrufe(r) for r in s_dok["records"]], result=_anzeige(suche_pfad),
+                           result_path=str(suche_pfad), evaluation=s_dok.get("evaluation"), summary=s_dok["summary"])
         _state.clear()
         _state.update(
             running=False, records=records, runs=dokument["meta"]["runs"], run=max(r["run"] for r in records),
-            case=faelle.pop() if len(faelle) == 1 else None,
+            case=faelle.pop() if len(faelle) == 1 else None, passages_file=dokument["meta"]["passages_file"],
             provider=dokument["meta"]["provider"], model=dokument["meta"]["model_requested"], current=None,
             result=_anzeige(pfad), result_path=str(pfad), evaluation=evaluation,
             gate_run=min(gate_laeufe) if gate_laeufe else None,
@@ -263,18 +358,17 @@ def paarvergleich_starten(params: dict[str, Any]) -> dict[str, Any]:
     """Startet den Paarvergleich für den Fall, wenn er Gate 1 mit continue
     verlassen hat. Ein gestoppter Fall geht nicht an Schritt 5. Zustandslos:
     mit einem Fall gibt es keinen Verlauf, der History-Bedingung bliebe nur
-    das Etikett."""
+    das Etikett. Immer mit Begründung und Belegstellen (Spec 07): Gate 2 zeigt
+    je Urteil, worauf es sich stützt."""
     provider = params.get("provider")
     model = (params.get("model") or "").strip()
     runs = int(params.get("runs") or 1)
     pause = float(params.get("pause") or 0)
     condition = CONDITION_STATELESS
-    justification = bool(params.get("justification"))
-    evidence = bool(params.get("evidence"))
     if provider not in PROVIDERS or not model or runs < 1 or pause < 0:
         raise ValueError("Anbieter, Modell, mindestens 1 Lauf und eine Pause ab 0 s angeben.")
     with _lock:
-        if _state["running"] or (_state.get("step5") or {}).get("running"):
+        if _laeuft_etwas():
             raise ValueError("Es läuft bereits ein Durchlauf.")
         gate = _gate_status()
         if not gate or not gate["cases"]:
@@ -290,12 +384,12 @@ def paarvergleich_starten(params: dict[str, Any]) -> dict[str, Any]:
             raise GateError("Der Fall hat Gate 1 nicht mit continue verlassen; an Schritt 5 geht nichts.")
         ergebnis = Path(_state["result_path"])
         builder, quellen = builder_from_gate1([gate_pfad(ergebnis, gate["run"], d) for d in frei])
-        builder = replace(builder, justification=justification or evidence, evidence=evidence)
+        builder = replace(builder, justification=True, evidence=True)
         client = build_client(provider, model)
         namen = builder.criteria_by_id()
         _state["step5"] = {
             "running": True, "provider": provider, "model": model, "runs": runs, "pause": pause,
-            "condition": condition, "justification": justification or evidence, "evidence": evidence,
+            "condition": condition, "justification": True, "evidence": True,
             "run": 1, "current": None, "responses": [],
             "cases": [
                 {"id": c.id, "title": c.title,
@@ -481,6 +575,11 @@ def gate2_abschliessen(params: dict[str, Any]) -> dict[str, Any]:
     return status()
 
 
+def lieferanten() -> dict[str, Any]:
+    """Rohdaten für Teil B, nur lesend."""
+    return partb_data.load_partb()
+
+
 def _anzeige(pfad: Path) -> str:
     return str(pfad.relative_to(ROOT) if pfad.is_relative_to(ROOT) else pfad)
 
@@ -490,13 +589,14 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-        routen = {"/api/basis": basis, "/api/status": status}
+        routen = {"/api/basis": basis, "/api/status": status, "/api/partb": lieferanten}
         if path not in routen:
             return self._json(404, {"error": f"Unbekannte Route {path}"})
         self._antworte(routen[path])
 
     def do_POST(self) -> None:
         routen = {
+            "/api/search/start": suchen,
             "/api/start": starten,
             "/api/gate1/open": gate_oeffnen,
             "/api/gate1/close": gate_abschliessen,
