@@ -49,10 +49,11 @@ from experiment import run_experiment
 from assignment import CRITERIA_FILE, PASSAGES_FILE, load_criteria, load_passages, run_assignment, sha256
 from assignment_eval import evaluate_file
 from relevance import OUT_DIR as SEARCH_DIR, run_search
-from gate1 import SUPERVISED, Action, Actions, GateError, apply_gate1, assignments_from_records
+from gate1 import ADDED_PREFIX, SUPERVISED, Action, Actions, AddedEvidence, GateError, apply_gate1, assignments_from_records
 from gate2 import Gate2Session, JudgmentAction
 import ahp
 import partb_data
+import partb_ranking
 import gate2_cli
 import ledger
 from gate1_cli import abschlussstand, builder_from_gate1, events_pfad, gate_pfad, speichern
@@ -364,7 +365,8 @@ def _gate_status() -> dict[str, Any] | None:
             faelle[case_id] = {k: inhalt[k] for k in ("status", "decision", "counts", "criteria_without_evidence")}
             faelle[case_id]["file"] = _anzeige(pfad)
             faelle[case_id]["passages"] = {
-                p["passage_id"]: {"action": p["action"], "criterion": p["criterion"], "reason": p["reason"]}
+                p["passage_id"]: {"action": p["action"], "criterion": p["criterion"], "reason": p["reason"],
+                                  **({"text": p["text"], "source": p["source"]} if p.get("source") else {})}
                 for p in inhalt["passages"]
             }
     return {"run": run, "cases": faelle}
@@ -409,9 +411,15 @@ def gate_abschliessen(params: dict[str, Any]) -> dict[str, Any]:
             reviewer=params.get("reviewer"),
             mode=SUPERVISED,
             decision_reason=params.get("decision_reason") or "",
+            # Spec 09: eigene Aussagen für Kriterien ohne Evidenz
+            added=tuple(AddedEvidence(str(z.get("criterion") or ""), str(z.get("text") or ""), str(z.get("reason") or ""))
+                        for z in params.get("added") or []),
         )
         ergebnis = apply_gate1(assignments_from_records(records), actions, dokument["meta"]["criteria"])
         zeiten = {a["passage_id"]: _utc(a["timestamp"]) for a in eingaben if a.get("timestamp")}
+        # IDs der eigenen Aussagen vergibt gate1 in Reihenfolge (M01, M02, …)
+        zeiten.update({f"{ADDED_PREFIX}{i:02d}": _utc(z["timestamp"])
+                       for i, z in enumerate(params.get("added") or [], start=1) if z.get("timestamp")})
         speichern(ergebnis_pfad, dokument["meta"], run, case_id, ergebnis, geoeffnet, _jetzt(), zeiten)
     return status()
 
@@ -642,12 +650,50 @@ def gate2_abschliessen(params: dict[str, Any]) -> dict[str, Any]:
         ergebnis = eintrag["sitzung"].decide(params.get("decision"), params.get("reason") or "")
         gate2_cli.speichern(eintrag["fall"], ergebnis, eintrag["geoeffnet"], _jetzt(), eintrag["zeiten"], eintrag["repair"])
         del _state["gate2_sessions"][case_id]
+        schritt5 = Path(_state["step5"]["result_path"])
+        run = int(_state.get("gate2_run") or 1)
+    if params.get("decision") == "accept":
+        _teil_b(schritt5, run, case_id)  # Gewichtsversion und Ranking gleich mit festhalten
     return status()
 
 
-def lieferanten() -> dict[str, Any]:
-    """Rohdaten für Teil B, nur lesend."""
-    return partb_data.load_partb()
+def _teil_b(schritt5: Path, run: int, case_id: str, options: bool = False) -> dict[str, Any]:
+    """Schritt 8 und Teil B für einen mit accept abgeschlossenen Fall: fixe
+    Gewichtsversion und Ranking (eingefroren, idempotent), mit options auch mit
+    Pufferlager-Optionen (Spec 08). Fehler kommen als Text zurück, damit die
+    Lieferantenansicht trotzdem erscheint."""
+    try:
+        pfad = partb_ranking.ranking_fuer_gate2(gate2_cli.gate2_pfad(schritt5, run, case_id), options=options)
+        return {**partb_ranking.load_ranking(pfad), "file": _anzeige(pfad)}
+    except (GateError, OSError, ValueError) as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def lieferanten(options: bool = False) -> dict[str, Any]:
+    """Rohdaten für Teil B, dazu je Bauteil die drei Kennzahlen und, wenn Gate 2
+    den Fall mit accept abgeschlossen hat, das Ranking aus der fixen Gewichtsversion.
+    Mit options (Schalter „mit Pufferlager“) zusätzlich die Lager-Optionen aus
+    buffer_options.csv als eigene Alternativen; ohne bleibt alles wie vorher."""
+    daten = partb_data.load_partb()
+    if not daten.get("available"):
+        return daten
+    daten["options"] = options
+    with _lock:
+        gate2 = _gate2_status()
+        schritt5 = Path(_state["step5"]["result_path"]) if gate2 else None
+    for component, eintrag in daten["components"].items():
+        try:
+            eintrag["indicators"] = partb_ranking.kennzahlen_bauteil(daten, component, options)
+        except GateError as exc:
+            eintrag["indicators_error"] = str(exc)
+        fall = (gate2 or {}).get("cases", {}).get(component) or {}
+        if fall.get("state") == "done" and fall.get("decision") == "accept":
+            eintrag["ranking"] = _teil_b(schritt5, gate2["run"], component, options)
+    return daten
+
+
+def lieferanten_mit_optionen() -> dict[str, Any]:
+    return lieferanten(options=True)
 
 
 def _anzeige(pfad: Path) -> str:
@@ -659,7 +705,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-        routen = {"/api/basis": basis, "/api/status": status, "/api/partb": lieferanten}
+        routen = {"/api/basis": basis, "/api/status": status, "/api/partb": lieferanten,
+                  "/api/partb/options": lieferanten_mit_optionen}
         if path not in routen:
             return self._json(404, {"error": f"Unbekannte Route {path}"})
         self._antworte(routen[path])

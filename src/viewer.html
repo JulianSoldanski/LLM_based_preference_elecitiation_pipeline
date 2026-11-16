@@ -67,6 +67,9 @@
   .chip.verschoben { background: var(--edit-bg); border-color: transparent; color: var(--edit); }
   .chip.geloescht { opacity: .6; text-decoration: line-through; }
   .chip.gewaehlt { outline: 2px solid var(--accent); }
+  .chip.eigen { border-style: solid; border-color: var(--accent); }
+  .chip.eigen .text { display: block; margin-top: 2px; color: var(--muted); }
+  .ergaenzen { display: block; width: 100%; margin-top: 4px; font-size: 12px; }
   .chip.jetzt { border-color: var(--accent); animation: puls 1s ease-in-out infinite; }
   .chip.neu { animation: rein .5s ease-out; }
   @keyframes puls { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } }
@@ -99,23 +102,17 @@
   dialog .knoepfe { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   .legende { font-size: 12px; margin-top: 8px; }
 
-  /* Teil B: Lieferantendaten */
+  /* Teil B: Lieferantenauswahl */
   .spalten.lf { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-  .spalte[data-lsup] { cursor: pointer; }
   .abschnitt { font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
+  details.roh { margin-top: 10px; }
+  details.roh > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
   .lzeile { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 4px; }
   .strip { display: flex; flex-wrap: wrap; gap: 2px; }
   .q { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
   .q.ok { background: var(--ok); }
   .q.bad { background: var(--bad); }
   .q.teil { background: var(--edit); }
-  .tabelle { overflow: auto; max-height: 440px; margin-top: 8px; }
-  table.daten { border-collapse: collapse; font-size: 12px; width: 100%; }
-  table.daten th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  table.daten td { padding: 3px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
-  table.daten td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  table.daten td.bad { color: var(--bad); font-weight: 600; }
-  table.daten td.teil { color: var(--edit); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -162,13 +159,16 @@
   let timer = null;
   let fall = null;           // in Gate 1 geöffneter Fall
   let entwurf = {};          // Gate 1: { fall: { passage_id: {action, new_criterion, reason, timestamp} } }
+  let zusaetze = {};         // Gate 1, Spec 09: { fall: [ {criterion, text, reason, timestamp} ] } eigene Aussagen
   let formGeaendert = false; // Produkt/Datei von Hand geändert: dann nicht mehr der Suche folgen
   let ansicht = null;        // "zuordnung", "paarvergleich" oder "gate2"; null = automatisch
   let fall2 = null;          // in Gate 2 gewählter Fall
   const g2Versucht = new Set(); // "run|fall": schon automatisch geöffnet (kein Wiederholen nach Fehler)
   let entwurf2 = {};         // Gate 2: { fall: { "a|b": {action, preference, intensity, reason} } } je Zyklus
-  let partb = null;          // Teil B: Rohdaten der Lieferanten (einmal geladen)
-  let lfFall = null, lfWahl = null, lfTab = "orders";
+  let partb = null;          // Teil B: Rohdaten, Kennzahlen, Ranking (beim Öffnen der Ansicht neu geladen)
+  let lfFall = null;
+  let lfLager = speicher.get("lflager") === "1";
+  const lfOffen = new Set();  // aufgeklappte „Konditionen und Rohdaten“ je Lieferant  // Teil B: Pufferlager-Optionen zeigen (Spec 08)
 
   async function api(pfad, body) {
     const antwort = await fetch(pfad, body ? { method: "POST", body: JSON.stringify(body) } : undefined);
@@ -279,8 +279,28 @@
     const offen = zust.filter(([, z]) => !z.action).map(([r]) => r.passage_id);
     const ohneGrund = zust.filter(([, z]) => (z.action === "delete" || z.action === "reassign") && !z.reason.trim()).map(([r]) => r.passage_id);
     const belegt = new Set(zust.map(([, z]) => z.ziel));
-    const ohneEvidenz = codes().filter((c) => !belegt.has(c));
-    return { offen, ohneGrund, ohneEvidenz, anzahl: rs.length };
+    const eigene = zusaetze[d] ?? [];
+    const ohneEvidenz = codes().filter((c) => !belegt.has(c) && !eigene.some((z) => z.criterion === c));
+    return { offen, ohneGrund, ohneEvidenz, anzahl: rs.length, eigene };
+  }
+
+  // Spec 09: eigene Aussage zu jedem Kriterium, neu (index null) oder bearbeiten.
+  async function ergaenzen(code, index = null) {
+    if (!fall || fallFertig(fall)) return;
+    const name = basis.criteria.find((c) => c.id === code)?.name ?? code, alt = index === null ? null : zusaetze[fall]?.[index];
+    const text = await fragen({ titel: `Eigene Aussage zu ${code} ${name}`,
+      text: "Beschreibe, wie wichtig das Kriterium für dieses Bauteil ist und warum. Die Aussage geht mit eigener ID "
+        + "(M01, …) hinter den Passagen des Kriteriums in den Paarvergleich und ist als Aussage des Prüfers gekennzeichnet.",
+      wert: alt?.text ?? "", pflicht: true, platzhalter: "Aussage (Pflicht)", ok: "Weiter" });
+    if (text === null) return;
+    const quelle = await fragen({ titel: `Quelle der Aussage zu ${code}`, zitat: text,
+      wert: alt?.reason ?? "", platzhalter: "z. B. Gespräch mit der Disposition (optional)", ok: "Übernehmen" });
+    if (quelle === null) return;
+    const eintrag = { criterion: code, text, reason: quelle, timestamp: new Date().toISOString() };
+    const liste = (zusaetze[fall] ??= []);
+    if (alt) liste[index] = eintrag; else liste.push(eintrag);
+    gewaehlt = "eigen:" + (alt ? index : liste.length - 1);
+    zeichnen();
   }
 
   async function oeffnen(d) {
@@ -301,9 +321,12 @@
       textfeld: decision !== "continue" });
     if (grund === null) return;
     const actions = Object.entries(entwurf[fall] ?? {}).filter(([, e]) => e.action).map(([passage_id, e]) => ({ passage_id, ...e }));
+    // Reihenfolge der Kriterien wie im Katalog: daraus folgen die IDs M01, M02, …
+    const eigene = pruefen(fall).eigene;
+    const added = codes().flatMap((c) => eigene.filter((z) => z.criterion === c));
     try {
       st = await api("/api/gate1/close", { run: gateRun(), case_id: fall, reviewer, decision,
-        decision_reason: grund, actions });
+        decision_reason: grund, actions, added });
       fehler();
       const naechster = faelle().find((d) => !fallFertig(d));
       gewaehlt = null;
@@ -362,7 +385,22 @@
       const zusatz = z.action === "confirm" ? " ✓" : z.action === "reassign" ? ` <span>von ${esc(agent(r))}</span>` : "";
       spalten.find((s) => s.code === z.ziel).karten.push(karte(r.passage_id, z.ziel, klasse, offen, zusatz));
     }
+    // Spec 09: eigene Aussagen unter den Passagen jeder Kriterienspalte, dazu der Knopf
+    const fertig = fallFertig(fall), eigene = offen ? zusaetze[fall] ?? [] : [];
+    for (const s of spalten.filter((x) => x.pruefen)) {
+      for (const [pid, p] of Object.entries(fertig?.passages ?? {}))
+        if (p.action === "add" && p.criterion === s.code) s.karten.push(eigenKarte(pid, pid, p.text));
+      eigene.forEach((z, i) => { if (z.criterion === s.code) s.karten.push(eigenKarte(i, "eigene Aussage", z.text)); });
+      if (offen) s.knopf = `<button class="ergaenzen" data-ergaenzen="${s.code}">+ Eigene Aussage</button>`;
+    }
     return spalten;
+  }
+
+  // schluessel: Index im Entwurf oder M-ID nach dem Abschluss
+  function eigenKarte(schluessel, titel, text) {
+    const kurz = text.length > 90 ? text.slice(0, 90) + " …" : text;
+    return `<div class="chip eigen ${gewaehlt === "eigen:" + schluessel ? "gewaehlt" : ""}" data-eigen="${esc(schluessel)}">
+      <b>${esc(titel)}</b> <span class="muted">Prüfer</span><span class="text">${esc(kurz)}</span></div>`;
   }
 
   // ---------------------------------------------------- Schritt 1: Aussagen suchen
@@ -454,7 +492,7 @@
       ["Gate 1", alleFertig ? "fertig" : gate ? "aktiv" : "", "zuordnung"],
       ["Paarvergleich", st.step5?.running ? "aktiv" : st.step5?.result ? "fertig" : "", "paarvergleich"],
       ["Gate 2", !st.gate2 ? "" : Object.values(st.gate2.cases).every((c) => ["done", "invalid"].includes(c.state)) ? "fertig" : "aktiv", "gate2"],
-      ["Teil B: Lieferanten", ansicht === "lieferanten" ? "aktiv" : "", "lieferanten"],
+      ["Teil B: Lieferantenauswahl", ansicht === "lieferanten" ? "aktiv" : "", "lieferanten"],
     ];
     // Mit gestartetem Paarvergleich lässt sich über die Schrittleiste zurück zum Gate wechseln.
     $("#schritte").innerHTML = schritte.map(([n, k, a], i) =>
@@ -527,7 +565,7 @@
     const spalten = inGate ? spaltenGate() : spaltenLauf();
     $("#spalten").innerHTML = spalten.map((s) => {
       const leer = s.pruefen && !s.karten.length ? ' <span class="leer">KEINE EVIDENZ</span>' : "";
-      return `<div class="spalte" data-code="${s.code}"><h2>${s.titel} <span>${s.karten.length || ""}</span>${leer}</h2>${s.karten.join("")}</div>`;
+      return `<div class="spalte" data-code="${s.code}"><h2>${s.titel} <span>${s.karten.length || ""}</span>${leer}</h2>${s.karten.join("")}${s.knopf ?? ""}</div>`;
     }).join("");
     $("#legende").textContent = inGate
       ? "Karte anklicken für Text und Aktion, oder in eine andere Spalte ziehen · gestrichelt: noch keine Aktion · ✓ bestätigt · gelb: neu zugeordnet · Erwartete Kriterien sind im Gate ausgeblendet."
@@ -548,7 +586,7 @@
     if (f) {
       const c = f.counts;
       $("#entscheidung").innerHTML = `<div class="entscheidung"><b>Fall ${esc(fall)} abgeschlossen: ${esc(f.decision)}</b> → ${esc(f.status)}
-        <span class="muted">· ${c.confirmed} bestätigt, ${c.reassigned} neu zugeordnet, ${c.deleted} gelöscht · ${esc(f.file)} (schreibgeschützt)</span></div>`;
+        <span class="muted">· ${c.confirmed} bestätigt, ${c.reassigned} neu zugeordnet, ${c.deleted} gelöscht${c.added ? `, ${c.added} eigene Aussage(n)` : ""} · ${esc(f.file)} (schreibgeschützt)</span></div>`;
       return;
     }
     const p = pruefen(fall);
@@ -568,6 +606,7 @@
 
   function detail() {
     if (!gewaehlt) return ($("#detail").innerHTML = "");
+    if (gewaehlt.startsWith("eigen:")) return detailEigen(gewaehlt.slice(6));
     const pid = gewaehlt, p = passage(pid);
     const r = st.records.find((x) => x.run === (gateModus() ? gateRun() : angezeigt ?? st.run) && x.passage_id === pid);
     if (!r) return ($("#detail").innerHTML = `<div class="detail"><p><b>${esc(pid)}</b></p><p>${esc(p.text)}</p><p class="muted">Noch nicht zugeordnet.</p></div>`);
@@ -599,6 +638,19 @@
         <span class="trenner"></span><span class="muted">Neu zuordnen</span>${ziele.map((c) =>
           `<button data-aktion="reassign" data-ziel="${c}" class="${z.action === "reassign" && z.ziel === c ? "aktiv" : ""}" ${aus}>${c}</button>`).join("")}
       </div>${mein}</div>`;
+  }
+
+  function detailEigen(schluessel) {
+    const fertig = fallFertig(fall)?.passages?.[schluessel];
+    const z = fertig ? { ...fertig } : zusaetze[fall]?.[Number(schluessel)];
+    if (!z) return ($("#detail").innerHTML = "");
+    const name = basis.criteria.find((c) => c.id === z.criterion)?.name ?? z.criterion;
+    $("#detail").innerHTML = `<div class="detail">
+      <p><b>${fertig ? esc(schluessel) : "Eigene Aussage"}</b> <span class="muted">${esc(z.criterion)} ${esc(name)} · vom Prüfer ergänzt, keine Passage aus den Dokumenten</span></p>
+      <div class="zitat">${esc(z.text)}</div>
+      <p class="muted">Quelle: ${esc(z.reason || "–")}</p>
+      ${fertig ? "" : `<div class="aktionen"><button data-eigen-aktion="bearbeiten" data-index="${esc(schluessel)}">Bearbeiten</button>
+        <button data-eigen-aktion="entfernen" data-index="${esc(schluessel)}">Entfernen</button></div>`}</div>`;
   }
 
   // -------------------------------------------------- Schritt 5: Paarvergleich
@@ -778,8 +830,9 @@
     zeichnen();
   }
 
-  // ------------------------------------------------------- Teil B: Lieferanten
-  // Nur lesend. Zeigt die Rohdaten aus data/partb/, keine Kennzahlen.
+  // ------------------------------------------------ Teil B: Lieferantenauswahl
+  // Nur lesend. Rohdaten aus data/partb/, je Lieferant die drei Kennzahlen und,
+  // nach accept in Gate 2, das Ranking aus der fixen Gewichtsversion (Backend).
 
   const zahl = (x, d = 0) => (x == null ? "–" : Number(x).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }));
   const eur = (x) => (x == null ? "–" : `${zahl(x, 2)} €`);
@@ -811,13 +864,106 @@
     return `<span class="muted">Gewichte stehen noch nicht fest: ${g ? "Gate 2 für diesen Fall ist noch offen." : "kein Durchlauf bis Gate 2 für diesen Fall."}</span>`;
   }
 
+  // Anzeigename; Lager-Optionen heißen <supplier_id>+LAGER.
+  const LAGER = "+LAGER";
+  const lfName = (sups) => (id) => {
+    const basisId = id.endsWith(LAGER) ? id.slice(0, -LAGER.length) : id;
+    const n = sups.find((s) => s.supplier_id === basisId)?.supplier_name ?? basisId;
+    return id.endsWith(LAGER) ? `${n} + Lager` : n;
+  };
+
+  // Kennzahlen eines Lieferanten; bei einer Lager-Option mit dem Basiswert daneben.
+  function kennzahlTabelle(kz, basis = null) {
+    const pct = (x) => (x == null ? "–" : `${zahl(x * 100, 1)} %`);
+    const vorher = (wert) => (basis ? ` <span class="muted">· ohne Lager ${wert}</span>` : "");
+    return `<div class="abschnitt">Kennzahlen</div>
+      <table>
+        <tr><td title="SCOR RL.1.2: pünktlich, vollständig, Dokumente korrekt, ohne Befund">Liefertreue (Perfect Order)</td>
+          <td><b>${pct(kz.liefertreue)}</b> <span class="muted">${kz.details.liefertreue.perfect_orders}/${kz.details.liefertreue.orders}</span>${vorher(basis && pct(basis.liefertreue))}</td></tr>
+        <tr><td title="SCOR Agility: Änderungsanfragen vollständig und bis zum gewünschten Termin umgesetzt">Flexibilität (Adaptability)</td>
+          <td><b>${pct(kz.flexibilitaet)}</b> <span class="muted">${kz.details.flexibilitaet.fulfilled_in_time}/${kz.details.flexibilitaet.change_requests}</span>${vorher(basis && pct(basis.flexibilitaet))}</td></tr>
+        <tr><td title="Preis laut Bestellung, Fracht, Prozesskosten und Reklamationen je geliefertem Stück${basis ? ", dazu Lagerhaltung" : ""}">Kosten je Stück (gesamt)</td>
+          <td><b>${eur(kz.kosten)}</b>${vorher(basis && eur(basis.kosten))}</td></tr>
+      </table>`;
+  }
+
+  // Karte einer Lager-Option: gleiche Konditionen und Historie wie der Basislieferant,
+  // andere Fakten durch das Lager. Zeigt, was nur wegen des Lagers als erfüllt zählt.
+  function lagerKarte(id, kz, basis, s, rang) {
+    const o = kz.details.option, d = kz.details;
+    const liste = (ids) => (ids.length ? ids.map(esc).join(", ") : "–");
+    return `<div class="spalte">
+      <h2>${rang ? `${rang.rank}. ` : ""}${esc(s.supplier_name)} + Lager <span>${esc(id)}${rang ? ` · Closeness ${zahl(rang.closeness, 3)}` : ""}</span></h2>
+      ${kennzahlTabelle(kz, basis)}
+      <div class="abschnitt">Pufferlager (Annahmen aus buffer_options.csv)</div>
+      <table>
+        <tr><td>Reichweite</td><td>${zahl(o.coverage_days)} Tage</td></tr>
+        <tr><td>Lagermenge Q</td><td>${zahl(o.buffer_qty)} Stück <span class="muted">· V = ${zahl(o.annual_volume)} Stück/Jahr</span></td></tr>
+        <tr><td>Lagerhaltungskostensatz</td><td>${zahl(o.carrying_rate * 100)} % p. a.</td></tr>
+        <tr><td>Lagerkosten je Stück</td><td>${eur(d.carrying_cost_per_unit)}</td></tr>
+      </table>
+      <div class="abschnitt">Nur wegen des Lagers erfüllt</div>
+      <div class="muted" style="font-size:12px">Bestellungen (Verspätung ≤ ${zahl(o.coverage_days)} Tage, Fehlmenge ≤ Q): ${liste(d.liefertreue.covered_by_buffer)}</div>
+      <div class="muted" style="font-size:12px;margin-top:4px">Änderungsanfragen (nur Mengenerhöhung ≤ Q): ${liste(d.flexibilitaet.covered_by_buffer)}</div>
+      <div class="muted" style="font-size:12px;margin-top:6px">Sonst alles wie ${esc(s.supplier_id)}.</div>
+    </div>`;
+  }
+
+  // Ranking des Falls (TOPSIS, Vektornormierung; Min-Max als Sensitivität).
+  function rankingTeilB(komp, sups) {
+    const r = komp.ranking;
+    if (!r) return `<div class="muted" style="margin-top:6px">Ranking erst nach accept in Gate 2 · Kennzahlen unten aus der ganzen Historie.</div>`;
+    if (r.error) return `<div class="zeile bad-text">Ranking nicht möglich: ${esc(r.error)}</div>`;
+    const name = lfName(sups);
+    const liste = r.ranking.map((z) => `<b>${z.rank}. ${esc(name(z.id))}</b> <span class="muted">(${zahl(z.closeness, 3)})</span>`).join(" · ");
+    const mm = r.same_order ? "gleiche Reihenfolge"
+      : `<b class="bad-text">abweichend:</b> ${r.ranking_minmax.map((z) => `${z.rank}. ${esc(name(z.id))}`).join(" · ")}`;
+    return `<div class="zeile"><span><b>Ranking</b> <span class="muted">TOPSIS, Vektornormierung:</span> ${liste}</span></div>
+      ${r.weights_consistent !== false ? "" : `<div class="bad-text">Gewichte mit CR ${zahl(r.cr, 3)} über der Schwelle ${r.cr_threshold} (in Gate 2 trotzdem accept).</div>`}
+      <div class="muted">Sensitivität mit Min-Max-Normierung: ${mm} · <span title="${esc(r.file)} (schreibgeschützt, Hash im Ereignislog)">eingefroren ✓</span></div>`;
+  }
+
+  // Karte eines Lieferanten: sichtbar Rang und die drei Kennzahlen, Konditionen
+  // und Rohdaten eingeklappt (Zustand bleibt beim Neuzeichnen erhalten).
+  function lieferantKarte(s, kz, rang) {
+    const k = s.conditions ?? {}, c = s.counts, n = c.orders, o = s.orders, ch = s.changes;
+    const zeile = (label, feld, ok) => `<div class="lzeile"><span>${label}</span>${strip(o, (x) => (x[feld] ? "ok" : "bad"),
+      (x) => `${x.po_id} · ${datum(x.receipt_date)}`)}<span class="muted">${ok}/${n}</span></div>`;
+    return `<div class="spalte">
+      <h2>${rang ? `${rang.rank}. ` : ""}${esc(s.supplier_name)} <span>${esc(s.supplier_id)}${rang ? ` · Closeness ${zahl(rang.closeness, 3)}` : ""}</span></h2>
+      ${kz ? kennzahlTabelle(kz) : ""}
+      <details class="roh" data-roh="${esc(s.supplier_id)}" ${lfOffen.has(s.supplier_id) ? "open" : ""}>
+        <summary>Konditionen und Rohdaten</summary>
+        <div class="abschnitt">Konditionen</div>
+        <table>
+          <tr><td>Stückpreis</td><td><b>${eur(k.unit_price_eur)}</b></td></tr>
+          <tr><td>Fracht je Lieferung</td><td>${eur(k.freight_eur_per_shipment)}</td></tr>
+          <tr><td>Lieferzeit (Zusage)</td><td>${zahl(k.quoted_lead_time_days)} Tage</td></tr>
+          <tr><td>Mindestmenge</td><td>${zahl(k.moq)} Stück</td></tr>
+          <tr><td>Kapazität</td><td>${zahl(k.capacity_units_per_year)} Stück/Jahr</td></tr>
+          <tr><td>Bestellkanal</td><td>${esc(de(s.order_channel))}</td></tr>
+        </table>
+        <div class="abschnitt">Lieferungen (${n}) · ${zahl(c.qty_received)} Stück</div>
+        ${zeile("pünktlich", "on_time", n - c.late)}
+        ${zeile("vollständig", "in_full", n - c.short)}
+        ${zeile("Dokumente", "docs", n - c.docs_bad)}
+        ${zeile("ohne Befund", "condition", n - c.rejected_orders)}
+        <div class="abschnitt">Änderungsanfragen (${ch.length})</div>
+        <div class="lzeile"><span>Antwort</span>${strip(ch, (x) => ({ accepted: "ok", partial: "teil", rejected: "bad" })[x.response],
+          (x) => `${x.cr_id} · ${de(x.change_type)} · ${de(x.response)}`)}<span class="muted">${c.changes.accepted}/${ch.length}</span></div>
+        <div class="abschnitt">Reklamationen (${s.claims.length}) · ${zahl(c.claim_units)} Stück</div>
+        <div class="muted" style="font-size:12px">Wareneingang ${c.claims.incoming_inspection} · Feld ${c.claims.field_warranty} · Rückläufer ${c.claims.return}</div>
+      </details>
+    </div>`;
+  }
+
   function zeichnenLieferanten() {
     $("#laeufe").innerHTML = "";
     $("#entscheidung").innerHTML = "";
     if (!partb) {
       $("#statustext").innerHTML = "Teil B · Lieferantendaten werden geladen …";
       $("#fokus").innerHTML = $("#spalten").innerHTML = $("#legende").textContent = $("#detail").innerHTML = "";
-      api("/api/partb").then((d) => { partb = d; zeichnen(); })
+      api(lfLager ? "/api/partb/options" : "/api/partb").then((d) => { partb = d; zeichnen(); })
         .catch((e) => { partb = { available: false, error: e.message ?? String(e) }; zeichnen(); });
       return;
     }
@@ -841,80 +987,36 @@
     const ids = Object.keys(partb.components);
     if (!ids.includes(lfFall)) lfFall = ids.includes(aktiverFall()) ? aktiverFall() : ids[0];
     const komp = partb.components[lfFall], sups = komp.suppliers;
-    if (!sups.some((s) => s.supplier_id === lfWahl)) lfWahl = sups[0].supplier_id;
     const dem = komp.demand ?? {}, zr = partb.period;
 
-    $("#statustext").innerHTML = `Teil B · Rohdaten der Lieferanten · ${esc(partb.dir)} · synthetisch, angelehnt an Wang et al. (2004)`;
+    $("#statustext").innerHTML = `Teil B · Lieferantenauswahl · Daten aus ${esc(partb.dir)}, synthetisch, angelehnt an Wang et al. (2004)`;
     $("#fokus").classList.remove("laeuft");
-    $("#fokus").innerHTML = `<div class="kopf">Lieferantendaten · ${esc(fallTitel(lfFall))}</div>
+    $("#fokus").innerHTML = `<div class="kopf">Lieferantenauswahl · ${esc(fallTitel(lfFall))}</div>
       <div class="zeile"><span class="faelle">${ids.map((id) =>
         `<button class="${id === lfFall ? "aktiv" : ""}" data-lfall="${esc(id)}">${esc(fallTitel(id))}</button>`).join(" ")}</span>
         <button id="lfzurueck">← zurück zur Pipeline</button></div>
       <div class="zeile muted">Bedarf nächste Periode ${zahl(dem.annual_demand_units)} Stück · max. Fehlerquote ${zahl((dem.max_defect_rate ?? 0) * 100)} %
         ${zr ? ` · Historie ${datum(zr.start)} bis ${datum(zr.end)}` : ""}</div>
       <div class="zeile">${gewichteTeilB(lfFall)}</div>
-      <div class="muted" style="margin-top:6px">Rohdaten wie im ERP, noch keine Kennzahlen.</div>`;
+      ${partb.buffer_options ? `<div class="zeile"><label class="muted" title="Spec 08: derselbe Lieferant zusätzlich mit Pufferlager, gleiche Gewichte, andere Fakten">
+        <input type="checkbox" id="lflager" ${lfLager ? "checked" : ""}> mit Pufferlager (Annahmen aus buffer_options.csv)</label></div>` : ""}
+      ${komp.indicators_error ? `<div class="zeile bad-text">Kennzahlen nicht berechenbar: ${esc(komp.indicators_error)}</div>` : ""}
+      ${rankingTeilB(komp, sups)}`;
 
-    $("#spalten").innerHTML = sups.map((s) => {
-      const k = s.conditions ?? {}, c = s.counts, n = c.orders, o = s.orders;
-      const zeile = (label, feld, ok) => `<div class="lzeile"><span>${label}</span>${strip(o, (x) => (x[feld] ? "ok" : "bad"),
-        (x) => `${x.po_id} · ${datum(x.receipt_date)}`)}<span class="muted">${ok}/${n}</span></div>`;
-      const ch = s.changes;
-      return `<div class="spalte ${s.supplier_id === lfWahl ? "jetzt" : ""}" data-lsup="${esc(s.supplier_id)}">
-        <h2>${esc(s.supplier_name)} <span>${esc(s.supplier_id)}</span></h2>
-        <table>
-          <tr><td>Stückpreis</td><td><b>${eur(k.unit_price_eur)}</b></td></tr>
-          <tr><td>Fracht je Lieferung</td><td>${eur(k.freight_eur_per_shipment)}</td></tr>
-          <tr><td>Lieferzeit (Zusage)</td><td>${zahl(k.quoted_lead_time_days)} Tage</td></tr>
-          <tr><td>Mindestmenge</td><td>${zahl(k.moq)} Stück</td></tr>
-          <tr><td>Kapazität</td><td>${zahl(k.capacity_units_per_year)} Stück/Jahr</td></tr>
-          <tr><td>Bestellkanal</td><td>${esc(de(s.order_channel))}</td></tr>
-        </table>
-        <div class="abschnitt">Lieferungen (${n}) · ${zahl(c.qty_received)} Stück</div>
-        ${zeile("pünktlich", "on_time", n - c.late)}
-        ${zeile("vollständig", "in_full", n - c.short)}
-        ${zeile("Dokumente", "docs", n - c.docs_bad)}
-        ${zeile("ohne Befund", "condition", n - c.rejected_orders)}
-        <div class="abschnitt">Änderungsanfragen (${ch.length})</div>
-        <div class="lzeile"><span>Antwort</span>${strip(ch, (x) => ({ accepted: "ok", partial: "teil", rejected: "bad" })[x.response],
-          (x) => `${x.cr_id} · ${de(x.change_type)} · ${de(x.response)}`)}<span class="muted">${c.changes.accepted}/${ch.length}</span></div>
-        <div class="abschnitt">Reklamationen (${s.claims.length}) · ${zahl(c.claim_units)} Stück</div>
-        <div class="muted" style="font-size:12px">Wareneingang ${c.claims.incoming_inspection} · Feld ${c.claims.field_warranty} · Rückläufer ${c.claims.return}</div>
-      </div>`;
-    }).join("");
-    $("#legende").textContent = "Jedes Kästchen ist eine Bestellung bzw. Anfrage, zeitlich geordnet · grün erfüllt · rot nicht erfüllt · gelb teilweise · Lieferant anklicken für die Einzeldaten unten.";
-
-    const s = sups.find((x) => x.supplier_id === lfWahl);
-    const reiter = [["orders", `Bestellungen (${s.orders.length})`], ["changes", `Änderungsanfragen (${s.changes.length})`],
-                    ["claims", `Reklamationen (${s.claims.length})`]]
-      .map(([id, t]) => `<button class="${lfTab === id ? "aktiv" : ""}" data-ltab="${id}">${t}</button>`).join(" ");
-    const tabelle = (kopf, zeilen) => `<div class="tabelle"><table class="daten"><tr>${kopf.map((h) => `<th>${h}</th>`).join("")}</tr>${zeilen.join("")}</table></div>`;
-    const td = (v, klasse = "") => `<td class="${klasse}">${v}</td>`;
-    let inhalt, datei;
-    if (lfTab === "changes") {
-      datei = "change_requests.csv";
-      inhalt = tabelle(["Anfrage", "angefragt", "Art", "Änderung", "gebraucht bis", "Antwort", "umgesetzt am", "umgesetzt"],
-        s.changes.map((x) => `<tr>${td(esc(x.cr_id))}${td(datum(x.request_date))}${td(esc(de(x.change_type)))}
-          ${td(x.change_pct == null ? "–" : `${x.change_pct} %`, "num")}${td(datum(x.requested_by_date))}
-          ${td(esc(de(x.response)), { rejected: "bad", partial: "teil" }[x.response] ?? "")}
-          ${td(datum(x.fulfilled_date), x.fulfilled_date && x.fulfilled_date > x.requested_by_date ? "bad" : "")}
-          ${td(x.fulfilled_pct == null ? "–" : `${x.fulfilled_pct} %`, "num")}</tr>`));
-    } else if (lfTab === "claims") {
-      datei = "claims.csv";
-      inhalt = tabelle(["Reklamation", "Datum", "Art", "Bestellung", "Grund", "Stück", "Bearbeitungskosten"],
-        s.claims.map((x) => `<tr>${td(esc(x.claim_id))}${td(datum(x.claim_date))}${td(esc(de(x.claim_type)))}${td(esc(x.po_id))}
-          ${td(esc(x.reason ? de(x.reason) : ""))}${td(zahl(x.qty_affected), "num")}${td(eur(x.handling_cost_eur), "num")}</tr>`));
-    } else {
-      datei = "purchase_orders.csv";
-      inhalt = tabelle(["Bestellung", "bestellt", "Menge", "Preis", "zugesagt", "Wareneingang", "geliefert", "abgelehnt", "Grund", "Dokumente", "Fracht"],
-        s.orders.map((x) => `<tr>${td(esc(x.po_id))}${td(datum(x.order_date))}${td(zahl(x.qty_ordered), "num")}${td(eur(x.unit_price_eur), "num")}
-          ${td(datum(x.commit_date))}${td(datum(x.receipt_date), x.on_time ? "" : "bad")}${td(zahl(x.qty_received), x.in_full ? "num" : "num bad")}
-          ${td(zahl(x.qty_rejected), x.qty_rejected ? "num bad" : "num")}${td(esc(x.rejection_reason ? de(x.rejection_reason) : ""))}
-          ${td(x.docs ? "ok" : esc(de(x.doc_issue)), x.docs ? "" : "bad")}${td(eur(x.freight_eur), "num")}</tr>`));
+    // Je Lieferant eine Karte, die Lager-Option direkt dahinter; mit Ranking nach Rang sortiert.
+    const raenge = Object.fromEntries((komp.ranking?.ranking ?? []).map((z) => [z.id, z]));
+    const karten = [];
+    for (const s of sups) {
+      const kz = komp.indicators?.[s.supplier_id];
+      karten.push({ id: s.supplier_id, html: lieferantKarte(s, kz, raenge[s.supplier_id]) });
+      const lagerId = s.supplier_id + LAGER, lagerKz = lfLager ? komp.indicators?.[lagerId] : null;
+      if (lagerKz) karten.push({ id: lagerId, html: lagerKarte(lagerId, lagerKz, kz, s, raenge[lagerId]) });
     }
-    $("#detail").innerHTML = `<div class="detail"><div class="kopf"><b>${esc(s.supplier_name)}</b> <span class="muted">· Einzeldaten aus ${esc(partb.dir)}/${datei}</span></div>
-      <div class="zeile">${reiter}</div>${inhalt}
-      <p class="legende muted">Rot: Termin verfehlt, Menge unvollständig, Befund oder Dokumentenfehler · bei Änderungsanfragen rot: später umgesetzt als gebraucht.</p></div>`;
+    if (komp.ranking?.ranking) karten.sort((x, y) => (raenge[x.id]?.rank ?? 99) - (raenge[y.id]?.rank ?? 99));
+    $("#spalten").innerHTML = karten.map((k) => k.html).join("");
+    $("#legende").textContent = "Kennzahlen über die ganze Historie · „Konditionen und Rohdaten“ aufklappen: Kästchen je Bestellung bzw. Anfrage, grün erfüllt · rot nicht erfüllt · gelb teilweise";
+
+    $("#detail").innerHTML = "";
   }
 
   // ------------------------------------------------------------------ Abfrage
@@ -943,7 +1045,7 @@
       formGeaendert = false;
       st = await api("/api/search/start", { provider: $("#provider").value, model: $("#model").value, case: $("#fall").value,
         passages: $("#passagen").value, pause: Number($("#pause").value) });
-      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
+      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; zusaetze = {}; ansicht = null;
       abfragen();
     } catch (err) { fehler(err); }
   };
@@ -953,7 +1055,7 @@
     try {
       st = await api("/api/start", { provider: $("#provider").value, model: $("#model").value,
         runs: Number($("#runs").value), pause: Number($("#pause").value) });
-      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; ansicht = null;
+      angezeigt = null; gewaehlt = null; gesehen = new Set(); fall = null; entwurf = {}; zusaetze = {}; ansicht = null;
       abfragen();
     } catch (err) { fehler(err); }
   }
@@ -962,7 +1064,7 @@
     if (e.target.id === "zuordnen" && !e.target.disabled) return zuordnen();
     if (e.target.dataset?.ansichtZiel) { ansicht = e.target.dataset.ansichtZiel; gewaehlt = null; return zeichnen(); }
     if (e.target.id === "lfzurueck") { ansicht = null; if (partb?.error) partb = null; fehler(); return zeichnen(); }
-    if (e.target.dataset?.lfall) { lfFall = e.target.dataset.lfall; lfWahl = null; return zeichnen(); }
+    if (e.target.dataset?.lfall) { lfFall = e.target.dataset.lfall; return zeichnen(); }
     if (e.target.id === "gatestart") return oeffnen(faelle()[0]);
     if (e.target.id === "paarvergleich") return paarvergleichStarten();
     if (e.target.id === "gate2start") { ansicht = "gate2"; return zeichnen(); }
@@ -979,11 +1081,17 @@
   // Vor dem Start zeigen die Spalten die Passagen des gewählten Falls.
   $("#fall").onchange = () => { formGeaendert = true; speicher.set("fall", $("#fall").value); zeichnen(); };
   $("#passagen").onchange = () => { formGeaendert = true; speicher.set("passagen", $("#passagen").value); zeichnen(); };
-  $("#fokus").onchange = (e) => { if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim()); };
+  $("#fokus").onchange = (e) => {
+    if (e.target.id === "reviewer") speicher.set("reviewer", e.target.value.trim());
+    if (e.target.id === "lflager") { lfLager = e.target.checked; speicher.set("lflager", lfLager ? "1" : ""); partb = null; zeichnen(); }
+  };
+
+  $("#spalten").addEventListener("toggle", (e) => {
+    const id = e.target.dataset?.roh;
+    if (id) e.target.open ? lfOffen.add(id) : lfOffen.delete(id);
+  }, true);
 
   $("#spalten").onclick = (e) => {
-    const lieferant = e.target.closest("[data-lsup]");
-    if (lieferant && ansicht === "lieferanten") { lfWahl = lieferant.dataset.lsup; return zeichnen(); }
     const knopf = e.target.closest("[data-g2aktion]");
     if (knopf && !knopf.disabled) {
       const eintrag = ((entwurf2[fall2] ??= {})[knopf.dataset.paar] ??= {});
@@ -991,8 +1099,10 @@
       if (eintrag.action !== "set") { delete eintrag.preference; delete eintrag.intensity; }
       return zeichnen();
     }
+    const plus = e.target.closest("[data-ergaenzen]");
+    if (plus) return ergaenzen(plus.dataset.ergaenzen);
     const chip = e.target.closest(".chip");
-    if (chip) { gewaehlt = chip.dataset.pid; zeichnen(); }
+    if (chip) { gewaehlt = chip.dataset.eigen ? "eigen:" + chip.dataset.eigen : chip.dataset.pid; zeichnen(); }
   };
   $("#spalten").oninput = (e) => {
     const feld = e.target.dataset?.g2feld;
@@ -1030,8 +1140,15 @@
   };
 
   $("#detail").onclick = (e) => {
-    const reiter = e.target.closest("[data-ltab]");
-    if (reiter && ansicht === "lieferanten") { lfTab = reiter.dataset.ltab; return zeichnen(); }
+    const eigen = e.target.closest("[data-eigen-aktion]");
+    if (eigen) {
+      const index = Number(eigen.dataset.index), z = zusaetze[fall]?.[index];
+      if (!z) return;
+      if (eigen.dataset.eigenAktion === "bearbeiten") return ergaenzen(z.criterion, index);
+      zusaetze[fall].splice(index, 1);
+      gewaehlt = null;
+      return zeichnen();
+    }
     const b = e.target.closest("[data-aktion]");
     if (!b || b.disabled) return;
     handeln(gewaehlt, b.dataset.aktion, b.dataset.ziel ?? null);
@@ -1066,6 +1183,7 @@
 
   $("#schritte").onclick = (e) => {
     const a = e.target.closest("[data-ansicht]")?.dataset.ansicht;
+    if (a === "lieferanten" && !partb?.error) partb = null;  // Ranking kann seit dem letzten Laden entstanden sein
     if (a) { ansicht = a; gewaehlt = null; zeichnen(); }
   };
   $("#laeufe").onclick = (e) => {

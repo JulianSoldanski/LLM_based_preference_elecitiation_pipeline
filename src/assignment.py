@@ -3,12 +3,19 @@
 Ein LLM ordnet jede Passage einzeln genau einem Kriterium eines geladenen
 Katalogs zu oder "none": ein Aufruf je Passage, kein Fallkontext, keine
 Gewichtung. Die Antwort ist über das API-Schema an die Codes des Katalogs
-gebunden und wird zusätzlich im Code geprüft. Eine ungültige Antwort wird genau einmal mit identischer Anfrage
-wiederholt; scheitert auch die, bleibt die Passage als "failed" im Ergebnis.
+gebunden und wird zusätzlich im Code geprüft. Eine ungültige Antwort wird genau
+einmal mit identischer Anfrage wiederholt; scheitert auch die, bleibt die
+Passage als "failed" im Ergebnis.
+
+Im Artefakt kommen die Passagen aus Schritt 1 "Aussagen suchen"
+(relevance.py): Mit --search wird nur zugeordnet, was die Suche für das Produkt
+gefunden hat, egal aus welchem Dokument. doc_id ist dann der Fall der Suche,
+das Dokument der Passage steht in source_doc_id.
 
     python3 src/assignment.py --dry-run
-    python3 src/assignment.py --model gpt-4o-2024-08-06 --runs 5
-    python3 src/assignment.py --model gpt-4o-2024-08-06 --case ketten   # nur ein Fall
+    python3 src/assignment.py --model gpt-4o-2024-08-06 --search results/relevance/<suche>.json
+    python3 src/assignment.py --model gpt-4o-2024-08-06 --runs 5            # alle Passagen (Evaluation)
+    python3 src/assignment.py --model gpt-4o-2024-08-06 --case ketten       # nur ein Dokument
 
 Jeder Datensatz ist eine flache Zeile je Passage und Lauf. "criteria" ist eine
 Liste mit höchstens einem Code ([] = "none"), damit Auswertung und ältere
@@ -47,7 +54,7 @@ from runner import RESULTS_DIR, model_slug
 from schema import Criterion, strip_code_fence
 
 CRITERIA_FILE = CONFIG_DIR / "criteria_wang2004.yaml"
-PROMPT_FILE = PROMPTS_DIR / "assignment_v2.md"
+PROMPT_FILE = PROMPTS_DIR / "assignment_v3.md"
 PASSAGES_FILE = ROOT / "data" / "passages_evaluation.csv"
 OUT_DIR = RESULTS_DIR / "assignment"
 
@@ -181,13 +188,31 @@ def output_schema(codes: list[str]) -> dict[str, Any]:
     }
 
 
-def prepare(passages_path: Path, criteria_path: Path, prompt_path: Path, doc_id: str | None = None) -> dict[str, Any]:
+def prepare(
+    passages_path: Path,
+    criteria_path: Path,
+    prompt_path: Path,
+    doc_id: str | None = None,
+    passage_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """Lädt alle Eingaben und rendert die Prompts, bevor ein Modell gerufen wird.
-    Mit doc_id nur die Passagen dieses Falls (das Artefakt bearbeitet einen Fall)."""
+    Mit doc_id nur die Passagen dieses Falls (das Artefakt bearbeitet einen Fall).
+    Mit passage_ids (Ergebnis von "Aussagen suchen") genau diese Passagen, aus
+    jedem Dokument; ihre doc_id wird zum Fall, das Dokument bleibt in source_doc_id."""
     criteria = load_criteria(criteria_path)
     codes = [c.id for c in criteria]
     passages = load_passages(passages_path, codes)
-    if doc_id is not None:
+    if passage_ids is not None:
+        if doc_id is None:
+            raise ConfigError("Zu den gefundenen Passagen gehört ein Fall (doc_id).")
+        bekannt = {p["passage_id"]: p for p in passages}
+        fehlen = [pid for pid in passage_ids if pid not in bekannt]
+        if fehlen:
+            raise ConfigError(f"Gefundene Passagen fehlen in {passages_path.name}: {fehlen}")
+        if not passage_ids:
+            raise ConfigError("Die Suche hat keine Aussagen gefunden, es gibt nichts zuzuordnen.")
+        passages = [{**bekannt[pid], "doc_id": doc_id, "source_doc_id": bekannt[pid]["doc_id"]} for pid in passage_ids]
+    elif doc_id is not None:
         bekannt = sorted({p["doc_id"] for p in passages})
         passages = [p for p in passages if p["doc_id"] == doc_id]
         if not passages:
@@ -237,6 +262,34 @@ def parse_assignment(raw: str, passage_id: str, codes: list[str]) -> tuple[list[
     return ([] if criterion == NONE else [criterion]), justification, []
 
 
+def _mit_wiederholung(
+    client: LLMClient,
+    system: str,
+    user: str,
+    name: str,
+    schema: dict[str, Any],
+    temperature: float,
+    parse: Callable[[str], tuple[Any, str, list[str]]],
+) -> tuple[Any, str | None, list[dict[str, Any]]]:
+    """Ein Aufruf; bei ungültiger Antwort genau eine identische Wiederholung.
+    Rückgabe (Wert, Begründung, Aufrufe); Begründung None heißt gescheitert."""
+    calls: list[dict[str, Any]] = []
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        call: dict[str, Any] = {"attempt": attempt, "timestamp": _jetzt(), "model_returned": None, "raw": ""}
+        try:
+            completion = client.complete_json(system, user, temperature, name, schema)
+        except Exception as exc:  # Netzfehler beenden den Lauf nicht
+            call["errors"] = [f"Client-Fehler: {type(exc).__name__}: {exc}"]
+        else:
+            call["model_returned"] = completion.model
+            call["raw"] = completion.text
+            wert, justification, call["errors"] = parse(completion.text)
+        calls.append(call)
+        if not call["errors"]:
+            return wert, justification, calls
+    return None, None, calls
+
+
 def assign(
     client: LLMClient,
     system: str,
@@ -247,21 +300,13 @@ def assign(
     temperature: float,
 ) -> dict[str, Any]:
     """Ein Aufruf je Passage; bei ungültiger Antwort eine identische Wiederholung."""
-    calls: list[dict[str, Any]] = []
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        call: dict[str, Any] = {"attempt": attempt, "timestamp": _jetzt(), "model_returned": None, "raw": ""}
-        try:
-            completion = client.complete_json(system, user, temperature, "assignment", schema)
-        except Exception as exc:  # Netzfehler beenden den Lauf nicht
-            call["errors"] = [f"Client-Fehler: {type(exc).__name__}: {exc}"]
-        else:
-            call["model_returned"] = completion.model
-            call["raw"] = completion.text
-            criteria, justification, call["errors"] = parse_assignment(completion.text, passage_id, codes)
-        calls.append(call)
-        if not call["errors"]:
-            return {"criteria": criteria, "justification": justification, "status": STATUS_OK, "calls": calls}
-    return {"criteria": None, "justification": None, "status": STATUS_FAILED, "calls": calls}
+    criteria, justification, calls = _mit_wiederholung(
+        client, system, user, "assignment", schema, temperature,
+        lambda raw: parse_assignment(raw, passage_id, codes),
+    )
+    if justification is None:
+        return {"criteria": None, "justification": None, "status": STATUS_FAILED, "calls": calls}
+    return {"criteria": criteria, "justification": justification, "status": STATUS_OK, "calls": calls}
 
 
 def summarize(records: list[dict[str, Any]], codes: list[str]) -> list[dict[str, Any]]:
@@ -293,6 +338,7 @@ def run_assignment(
     passages_path: Path = PASSAGES_FILE,
     criteria_path: Path = CRITERIA_FILE,
     prompt_path: Path = PROMPT_FILE,
+    search_path: Path | None = None,
     runs: int = 1,
     temperature: float = 0.0,
     out_dir: Path = OUT_DIR,
@@ -300,12 +346,26 @@ def run_assignment(
     doc_id: str | None = None,
     progress: Callable[[int, dict[str, Any], dict[str, Any] | None], None] | None = None,
 ) -> tuple[Path, Path]:
-    """n Durchläufe über alle Passagen, mit doc_id nur über die eines Falls.
-    Gibt (JSON-Pfad, Log-Pfad) zurück.
+    """n Durchläufe über alle Passagen, mit doc_id nur über die eines Falls,
+    mit search_path nur über die Passagen, die "Aussagen suchen" gefunden hat
+    (Fall und Passagendatei kommen dann aus der Suche). Gibt (JSON-Pfad, Log-Pfad) zurück.
 
     progress(run, passage, record) wird je Passage zweimal gerufen: vor dem
     Modellaufruf mit record=None und danach mit dem fertigen Datensatz."""
-    eingabe = prepare(passages_path, criteria_path, prompt_path, doc_id)
+    passage_ids = None
+    if search_path is not None:
+        # Hier importiert, weil relevance seinerseits dieses Modul importiert.
+        from relevance import found_ids, load_search
+
+        suche = load_search(search_path)
+        if doc_id not in (None, suche["meta"]["case_id"]):
+            raise ConfigError(f"Die Suche gilt für Fall {suche['meta']['case_id']!r}, nicht für {doc_id!r}.")
+        doc_id = suche["meta"]["case_id"]
+        passages_path = passages_path.parent / suche["meta"]["passages_file"]
+        if sha256(passages_path) != suche["meta"]["passages_sha256"]:
+            raise ConfigError(f"{passages_path.name} hat sich seit der Suche geändert; bitte neu suchen.")
+        passage_ids = found_ids(suche)
+    eingabe = prepare(passages_path, criteria_path, prompt_path, doc_id, passage_ids)
     start = datetime.now(timezone.utc)
     run_id = f"{start.astimezone().strftime(ZEITFORMAT_DATEI)}_{client.provider}_{model_slug(client.model_id)}"
     if doc_id is not None:
@@ -332,6 +392,8 @@ def run_assignment(
         "doc_id": doc_id,
         "max_attempts": MAX_ATTEMPTS,
         "output_schema": eingabe["schema"],
+        "search_file": Path(search_path).name if search_path else None,
+        "search_sha256": sha256(Path(search_path)) if search_path else None,
     }
     dokument: dict[str, Any] = {
         "meta": meta,
@@ -340,16 +402,22 @@ def run_assignment(
         "records": [],
     }
     # Ground Truth getrennt von den Datensätzen: im Human Gate soll sie nicht sichtbar sein.
-    truth = {p["passage_id"]: p["expected_criteria"] for p in eingabe["passages"] if p["expected_criteria"] is not None}
+    # Eine gefundene Passage aus einem anderen Dokument ist für diesen Fall keine Evidenz: erwartet "none".
+    truth = {
+        p["passage_id"]: p["expected_criteria"] if p.get("source_doc_id", p["doc_id"]) == p["doc_id"] else []
+        for p in eingabe["passages"]
+        if p["expected_criteria"] is not None
+    }
     if truth:
         dokument["ground_truth"] = truth
 
     logger = setup_logger(log_path, quiet)
     try:
         logger.info(
-            "Start %s | provider=%s model=%s temperature=%s runs=%d prompt=%s criteria=%s case=%s passages=%d",
+            "Start %s | provider=%s model=%s temperature=%s runs=%d prompt=%s criteria=%s case=%s passages=%d%s",
             meta["started"], client.provider, client.model_id, temperature, runs,
             meta["prompt_version"], meta["criteria_file"], doc_id or "alle", len(eingabe["passages"]),
+            f" (gefunden in {meta['search_file']})" if search_path else "",
         )
         logger.debug("---- SYSTEM-PROMPT ----\n%s", eingabe["system"])
         logger.debug("---- SCHEMA ----\n%s", json.dumps(eingabe["schema"], ensure_ascii=False))
@@ -372,6 +440,7 @@ def run_assignment(
                     "doc_id": passage["doc_id"],
                     "position": passage["position"],
                     "source": passage["source"],
+                    "source_doc_id": passage.get("source_doc_id", passage["doc_id"]),
                     "text": passage["text"],
                     "criteria": ergebnis["criteria"],
                     "justification": ergebnis["justification"],
@@ -446,6 +515,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--case", dest="doc_id", help="Nur die Passagen dieses Falls (doc_id). Ohne Angabe alle")
     parser.add_argument("--criteria", type=Path, default=CRITERIA_FILE, help="YAML mit dem Kriterienkatalog")
     parser.add_argument("--prompt", type=Path, default=PROMPT_FILE, help="Versionierte Prompt-Vorlage")
+    parser.add_argument("--search", type=Path, help="Ergebnis von relevance.py: nur die gefundenen Passagen zuordnen")
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR, help="Zielverzeichnis")
     parser.add_argument("--quiet", action="store_true", help="Keine Konsolenausgabe")
     parser.add_argument("--dry-run", action="store_true", help="Prompts und Schema ausgeben, kein Modellaufruf")
@@ -474,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         passages_path=args.passages,
         criteria_path=args.criteria,
         prompt_path=args.prompt,
+        search_path=args.search,
         runs=args.runs,
         temperature=args.temperature,
         out_dir=args.out_dir,

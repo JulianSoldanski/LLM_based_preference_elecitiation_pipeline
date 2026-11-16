@@ -151,7 +151,9 @@ class PromptBuilder:
         cases = []
         for gate in gate_results:
             vorlage = self.case(gate["case_id"])
-            texte = {p["passage_id"]: _clean(p["text"]) for p in sorted(gate["passages"], key=lambda p: p["position"])}
+            # Eigene Aussagen aus Gate 1 (Spec 09) haben keine Position und stehen hinten.
+            texte = {p["passage_id"]: _clean(p["text"])
+                     for p in sorted(gate["passages"], key=lambda p: (p["position"] is None, p["position"] or 0))}
             statements, passagen = {}, {}
             for code, passage_ids in gate["validated_evidence"].items():
                 if code not in self.assignment_codes:

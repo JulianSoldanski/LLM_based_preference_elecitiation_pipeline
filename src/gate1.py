@@ -10,6 +10,12 @@ Aktionen je Passage (fest):
     delete    Passage fällt raus                       Begründung Pflicht
     reassign  neues Kriterium der Hierarchie oder none  Begründung Pflicht
 
+Zusätzlich je Fall (Spec 09): eigene Aussagen ergänzen (add) für jedes
+Kriterium der Hierarchie, mit oder ohne Passage, auch mehrere. Jede bekommt
+die ID M01, M02, … und geht wie eine Passage an Schritt 5, hinter den
+Passagen des Kriteriums; Herkunft "reviewer" steht in der Gate-Datei und im
+Ereignislog.
+
 Danach eine Entscheidung für den Fall: continue (Schritt 5 startet) oder
 need_more_input (nichts geht an Schritt 5). continue verlangt eine Aktion für
 jede Passage und Evidenz für jedes Kriterium, weil der Paarvergleich je Fall
@@ -26,6 +32,9 @@ from assignment import NONE, STATUS_OK
 GATE = 1
 CONFIRM, DELETE, REASSIGN = "confirm", "delete", "reassign"
 ACTIONS = (CONFIRM, DELETE, REASSIGN)
+ADD = "add"  # eigene Aussage des Prüfers (Spec 09), nicht je Passage
+ADDED_PREFIX = "M"  # M01, M02, … (M = Mensch)
+REVIEWER_SOURCE = "reviewer"
 CONTINUE, NEED_MORE_INPUT = "continue", "need_more_input"
 SUPERVISED, AUTONOMOUS = "supervised", "autonomous"
 
@@ -55,6 +64,15 @@ class Action:
 
 
 @dataclass(frozen=True)
+class AddedEvidence:
+    """Eigene Aussage des Prüfers zu einem Kriterium (Spec 09)."""
+
+    criterion: str
+    text: str
+    reason: str = ""  # Quelle oder Begründung, optional
+
+
+@dataclass(frozen=True)
 class Actions:
     """Alles, was der Mensch für einen Fall entscheidet."""
 
@@ -63,6 +81,7 @@ class Actions:
     reviewer: str | None
     mode: str = SUPERVISED
     decision_reason: str = ""
+    added: tuple[AddedEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -155,6 +174,9 @@ def apply_gate1(assignments: list[Assignment], actions: Actions, hierarchy: list
         if final not in (None, NONE):
             evidence[final].append(a.passage_id)
 
+    if actions.added:
+        _ergaenzen(actions, evidence, hierarchy, actor, passages, events, counts, assignments)
+
     ohne = [code for code in hierarchy if not evidence[code]]
     if actions.decision == CONTINUE and ohne:
         raise GateError(f"continue nicht möglich, Kriterien ohne Evidenz: {ohne}; need_more_input wählen")
@@ -190,6 +212,55 @@ def autonomous(assignments: list[Assignment], hierarchy: list[str]) -> Gate1Resu
     belegt = {a.criterion for a in assignments}
     decision = CONTINUE if set(hierarchy) <= belegt else NEED_MORE_INPUT
     return apply_gate1(assignments, Actions(alles_bestaetigt, decision, reviewer=None, mode=AUTONOMOUS), hierarchy)
+
+
+def _ergaenzen(actions: Actions, evidence: dict[str, list[str]], hierarchy: list[str], actor: str,
+               passages: list[dict[str, Any]], events: list[dict[str, Any]], counts: dict[str, int],
+               assignments: list[Assignment]) -> None:
+    """Eigene Aussagen (Spec 09): nur im Modus supervised, für jedes Kriterium
+    der Hierarchie (nicht none), mit oder ohne Passage, beliebig viele."""
+    if actions.mode != SUPERVISED:
+        raise GateError("Eigene Aussagen nur im Modus supervised")
+    vergeben = {a.passage_id for a in assignments}
+    for nummer, zusatz in enumerate(actions.added, start=1):
+        code, text = zusatz.criterion, " ".join(zusatz.text.split())
+        if code not in hierarchy:
+            raise GateError(f"Eigene Aussage für unbekanntes Kriterium {code!r}, erlaubt sind {hierarchy}")
+        if not text:
+            raise GateError(f"{code}: eigene Aussage ohne Text")
+        pid = f"{ADDED_PREFIX}{nummer:02d}"
+        if pid in vergeben:
+            raise GateError(f"ID {pid} ist schon eine Passage")
+        passages.append(
+            {
+                "passage_id": pid,
+                "doc_id": None,
+                "position": None,
+                "text": text,
+                "source": REVIEWER_SOURCE,
+                "criterion_assigned": None,
+                "agent_reason": "",
+                "action": ADD,
+                "criterion": code,
+                "reason": zusatz.reason.strip(),
+            }
+        )
+        events.append(
+            {
+                "actor": actor,
+                "event_type": "GateAction",
+                "gate": GATE,
+                "passage_id": pid,
+                "action": ADD,
+                "old_value": None,
+                "new_value": code,
+                "reason": zusatz.reason.strip(),
+                "reviewer": actions.reviewer,
+                "text": text,
+            }
+        )
+        evidence[code].append(pid)
+    counts["added"] = len(actions.added)
 
 
 def _pruefe_aktion(action: Action, nach_id: dict[str, Assignment], erlaubt: list[str]) -> None:

@@ -43,6 +43,7 @@ from gate1 import (
     NEED_MORE_INPUT,
     REASSIGN,
     Action,
+    AddedEvidence,
     Actions,
     Assignment,
     Gate1Result,
@@ -243,6 +244,19 @@ def _interaktiv(
             zeiten[a.passage_id] = uhr()
 
         vorschau = apply_gate1(assignments, Actions(tuple(actions), NEED_MORE_INPUT, reviewer), hierarchy)
+        # Spec 09: eigene Aussagen zu beliebigen Kriterien (leer = fertig).
+        if vorschau.criteria_without_evidence:
+            ausgabe(f"\nOhne Evidenz: {', '.join(vorschau.criteria_without_evidence)}")
+        ergaenzt = []
+        while kriterium := _frage(eingabe, f"Eigene Aussage zu Kriterium ({', '.join(hierarchy)}, leer = keine): ",
+                                  ("", *hierarchy)):
+            text = ""
+            while not text:
+                text = eingabe("  Aussage (Pflicht): ").strip()
+            quelle = eingabe("  Quelle oder Begründung (optional): ").strip()
+            ergaenzt.append(AddedEvidence(kriterium, text, quelle))
+        vorschau = apply_gate1(assignments, Actions(tuple(actions), NEED_MORE_INPUT, reviewer, added=tuple(ergaenzt)),
+                               hierarchy)
         ausgabe("\nErgebnis: " + " · ".join(
             f"{code}: {', '.join(vorschau.validated_evidence.get(code, [])) or '–'}" for code in hierarchy))
         if vorschau.criteria_without_evidence:
@@ -255,7 +269,8 @@ def _interaktiv(
             continue
         grund = eingabe("Begründung zur Entscheidung (optional): ").strip()
         decision = CONTINUE if wahl == "w" else NEED_MORE_INPUT
-        return apply_gate1(assignments, Actions(tuple(actions), decision, reviewer, decision_reason=grund), hierarchy), zeiten
+        return apply_gate1(assignments, Actions(tuple(actions), decision, reviewer, decision_reason=grund,
+                                                added=tuple(ergaenzt)), hierarchy), zeiten
 
 
 def _frage_aktion(a: Assignment, erlaubt: list[str], eingabe: Eingabe) -> Action:
