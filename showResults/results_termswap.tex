@@ -1,0 +1,365 @@
+% Erzeugt von build_termswap_tex.py aus 20261118-185507_openai_gpt-5.4-mini-2026-03-17_stateless_termswap-original.json, 20261118-190124_openai_gpt-5.4-mini-2026-03-17_stateless_termswap-rot1.json, 20261118-190801_openai_gpt-5.4-mini-2026-03-17_stateless_termswap-rot2.json, 20261118-185507_anthropic_claude-haiku-4-5-20251001_stateless_termswap-original.json, 20261118-190243_anthropic_claude-haiku-4-5-20251001_stateless_termswap-rot1.json, 20261118-190944_anthropic_claude-haiku-4-5-20251001_stateless_termswap-rot2.json, 20261118-185507_mistral_mistral-small-2603_stateless_termswap-original.json, 20261118-190006_mistral_mistral-small-2603_stateless_termswap-rot1.json, 20261118-190537_mistral_mistral-small-2603_stateless_termswap-rot2.json, 20260924-101539_openai_gpt-5.4-mini-2026-03-17_stateless.json, 20260924-101309_anthropic_claude-haiku-4-5-20251001_stateless.json, 20260924-102357_mistral_mistral-small-2603_stateless.json. Nicht von Hand aendern.
+% Benoetigt im Praeambel-Teil: \usepackage{booktabs}. Gedacht zum Einbinden hinter results_rq3.tex
+% (verweist auf tab:weights-spread).
+\makeatletter
+\providecommand{\defresval}[2]{\expandafter\gdef\csname res@#1\endcsname{#2}}
+\providecommand{\resval}[1]{%
+  \ifcsname res@#1\endcsname\csname res@#1\endcsname\else\textbf{??#1}\fi}
+\makeatother
+
+\defresval{ts-clear-majority}{75\%}
+\defresval{ts-condition}{stateless}
+\defresval{ts-dist-max.claude-haiku-4-5-20251001}{0.082}
+\defresval{ts-dist-max.gpt-5-4-mini-2026-03-17}{0.603}
+\defresval{ts-dist-max.mistral-small-2603}{0.025}
+\defresval{ts-dist-max.models}{0.603}
+\defresval{ts-dist-min.claude-haiku-4-5-20251001}{0.000}
+\defresval{ts-dist-min.gpt-5-4-mini-2026-03-17}{0.012}
+\defresval{ts-dist-min.mistral-small-2603}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.batteriepacks.batteriepacks}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.batteriepacks.ketten}{0.029}
+\defresval{ts-dist.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule}{0.005}
+\defresval{ts-dist.claude-haiku-4-5-20251001.ketten.batteriepacks}{0.082}
+\defresval{ts-dist.claude-haiku-4-5-20251001.ketten.ketten}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten}{0.000}
+\defresval{ts-dist.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule}{0.000}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks}{0.000}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.batteriepacks.ketten}{0.057}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule}{0.022}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.ketten.batteriepacks}{0.012}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.ketten.ketten}{0.000}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule}{0.603}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks}{0.026}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten}{0.016}
+\defresval{ts-dist.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule}{0.000}
+\defresval{ts-dist.mistral-small-2603.batteriepacks.batteriepacks}{0.000}
+\defresval{ts-dist.mistral-small-2603.batteriepacks.ketten}{0.000}
+\defresval{ts-dist.mistral-small-2603.batteriepacks.konnektivitaetsmodule}{0.000}
+\defresval{ts-dist.mistral-small-2603.ketten.batteriepacks}{0.007}
+\defresval{ts-dist.mistral-small-2603.ketten.ketten}{0.000}
+\defresval{ts-dist.mistral-small-2603.ketten.konnektivitaetsmodule}{0.012}
+\defresval{ts-dist.mistral-small-2603.konnektivitaetsmodule.batteriepacks}{0.021}
+\defresval{ts-dist.mistral-small-2603.konnektivitaetsmodule.ketten}{0.025}
+\defresval{ts-dist.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule}{0.000}
+\defresval{ts-invalid}{8}
+\defresval{ts-n-models}{3}
+\defresval{ts-ref-max.claude-haiku-4-5-20251001}{0.082}
+\defresval{ts-ref-max.gpt-5-4-mini-2026-03-17}{0.072}
+\defresval{ts-ref-max.mistral-small-2603}{0.017}
+\defresval{ts-ref-max.models}{0.082}
+\defresval{ts-ref-min.models}{0.000}
+\defresval{ts-ref.claude-haiku-4-5-20251001.batteriepacks}{0.000}
+\defresval{ts-ref.claude-haiku-4-5-20251001.ketten}{0.082}
+\defresval{ts-ref.claude-haiku-4-5-20251001.konnektivitaetsmodule}{0.000}
+\defresval{ts-ref.gpt-5-4-mini-2026-03-17.batteriepacks}{0.057}
+\defresval{ts-ref.gpt-5-4-mini-2026-03-17.ketten}{0.072}
+\defresval{ts-ref.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule}{0.008}
+\defresval{ts-ref.mistral-small-2603.batteriepacks}{0.000}
+\defresval{ts-ref.mistral-small-2603.ketten}{0.017}
+\defresval{ts-ref.mistral-small-2603.konnektivitaetsmodule}{0.004}
+\defresval{ts-runs}{100}
+\defresval{ts-share-shift}{25}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.liefertreue-kosten.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.ketten.liefertreue-kosten.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.batteriepacks.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.batteriepacks.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.ketten.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.ketten.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.ketten.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.liefertreue-kosten.kosten}{53\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.liefertreue-kosten.liefertreue}{47\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.liefertreue-kosten.kosten}{93\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.liefertreue-kosten.liefertreue}{7\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.kosten}{23\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{77\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue-kosten.gleich}{1\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue-kosten.kosten}{1\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue-kosten.liefertreue}{98\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue-kosten.gleich}{1\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue-kosten.kosten}{94\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{5\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.ketten.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.batteriepacks.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.batteriepacks.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.ketten.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.ketten.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.ketten.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.konnektivitaetsmodule.flexibilitaet-liefertreue.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.konnektivitaetsmodule.kosten-flexibilitaet.kosten}{100\%}
+\defresval{ts-share.mistral-small-2603.ketten.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.batteriepacks.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.batteriepacks.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.batteriepacks.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.ketten.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.ketten.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.ketten.liefertreue-kosten.gleich}{1\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.ketten.liefertreue-kosten.liefertreue}{99\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet-liefertreue.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.kosten-flexibilitaet.flexibilitaet}{100\%}
+\defresval{ts-share.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue-kosten.liefertreue}{100\%}
+\defresval{ts-temperature}{0}
+\defresval{ts-total}{2700}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.flexibilitaet}{0.701}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.kosten}{0.193}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.batteriepacks.liefertreue}{0.106}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.ketten.flexibilitaet}{0.692}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.ketten.kosten}{0.216}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.ketten.liefertreue}{0.092}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.flexibilitaet}{0.698}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.kosten}{0.196}
+\defresval{ts-w.claude-haiku-4-5-20251001.batteriepacks.konnektivitaetsmodule.liefertreue}{0.107}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.batteriepacks.flexibilitaet}{0.052}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.batteriepacks.kosten}{0.300}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.batteriepacks.liefertreue}{0.648}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.ketten.flexibilitaet}{0.054}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.ketten.kosten}{0.357}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.ketten.liefertreue}{0.589}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.flexibilitaet}{0.054}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.kosten}{0.357}
+\defresval{ts-w.claude-haiku-4-5-20251001.ketten.konnektivitaetsmodule.liefertreue}{0.589}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.flexibilitaet}{0.736}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.kosten}{0.065}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.batteriepacks.liefertreue}{0.199}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.flexibilitaet}{0.736}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.kosten}{0.065}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.ketten.liefertreue}{0.199}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet}{0.736}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.kosten}{0.065}
+\defresval{ts-w.claude-haiku-4-5-20251001.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue}{0.199}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.flexibilitaet}{0.746}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.kosten}{0.119}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.liefertreue}{0.135}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.flexibilitaet}{0.743}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.kosten}{0.161}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.liefertreue}{0.097}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.flexibilitaet}{0.742}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.kosten}{0.107}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.liefertreue}{0.152}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.flexibilitaet}{0.053}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.kosten}{0.256}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.batteriepacks.liefertreue}{0.691}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.flexibilitaet}{0.053}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.kosten}{0.248}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue}{0.699}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.flexibilitaet}{0.052}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.kosten}{0.675}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue}{0.273}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.flexibilitaet}{0.744}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.kosten}{0.047}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.batteriepacks.liefertreue}{0.209}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.flexibilitaet}{0.744}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.kosten}{0.058}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.ketten.liefertreue}{0.197}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet}{0.757}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.kosten}{0.055}
+\defresval{ts-w.gpt-5-4-mini-2026-03-17.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue}{0.188}
+\defresval{ts-w.mistral-small-2603.batteriepacks.batteriepacks.flexibilitaet}{0.707}
+\defresval{ts-w.mistral-small-2603.batteriepacks.batteriepacks.kosten}{0.122}
+\defresval{ts-w.mistral-small-2603.batteriepacks.batteriepacks.liefertreue}{0.170}
+\defresval{ts-w.mistral-small-2603.batteriepacks.ketten.flexibilitaet}{0.707}
+\defresval{ts-w.mistral-small-2603.batteriepacks.ketten.kosten}{0.123}
+\defresval{ts-w.mistral-small-2603.batteriepacks.ketten.liefertreue}{0.170}
+\defresval{ts-w.mistral-small-2603.batteriepacks.konnektivitaetsmodule.flexibilitaet}{0.707}
+\defresval{ts-w.mistral-small-2603.batteriepacks.konnektivitaetsmodule.kosten}{0.122}
+\defresval{ts-w.mistral-small-2603.batteriepacks.konnektivitaetsmodule.liefertreue}{0.170}
+\defresval{ts-w.mistral-small-2603.ketten.batteriepacks.flexibilitaet}{0.089}
+\defresval{ts-w.mistral-small-2603.ketten.batteriepacks.kosten}{0.236}
+\defresval{ts-w.mistral-small-2603.ketten.batteriepacks.liefertreue}{0.675}
+\defresval{ts-w.mistral-small-2603.ketten.ketten.flexibilitaet}{0.090}
+\defresval{ts-w.mistral-small-2603.ketten.ketten.kosten}{0.231}
+\defresval{ts-w.mistral-small-2603.ketten.ketten.liefertreue}{0.679}
+\defresval{ts-w.mistral-small-2603.ketten.konnektivitaetsmodule.flexibilitaet}{0.090}
+\defresval{ts-w.mistral-small-2603.ketten.konnektivitaetsmodule.kosten}{0.222}
+\defresval{ts-w.mistral-small-2603.ketten.konnektivitaetsmodule.liefertreue}{0.688}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.batteriepacks.flexibilitaet}{0.705}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.batteriepacks.kosten}{0.103}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.batteriepacks.liefertreue}{0.191}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.ketten.flexibilitaet}{0.703}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.ketten.kosten}{0.108}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.ketten.liefertreue}{0.189}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.flexibilitaet}{0.722}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.kosten}{0.092}
+\defresval{ts-w.mistral-small-2603.konnektivitaetsmodule.konnektivitaetsmodule.liefertreue}{0.187}
+
+\subsection*{Influence of the component names}
+
+To test whether the component names themselves influence the judgements, the
+statements of each case were presented under the names of the other two components.
+Only the component names and the words that depend on them grammatically were
+exchanged; the statements were otherwise identical, character by character. Together
+with the original assignment, two rotations present each set of statements once
+under each of the three names (a Latin square). Each of the \resval{ts-n-models}
+models rated every combination in \resval{ts-runs} runs (\resval{ts-condition},
+temperature \resval{ts-temperature}). The original assignment was rerun in the same
+session, so that all combinations were collected under the same conditions. Of the
+\resval{ts-total} responses, \resval{ts-invalid} were invalid and are not included.
+
+Table~\ref{tab:termswap-distance} gives the distance between the mean weight vector
+of a set of statements under an exchanged name and under its original name, and
+Table~\ref{tab:termswap-weights} the underlying mean weights. As a reference, the
+rerun of the original lies at a distance of \resval{ts-ref-min.models} to
+\resval{ts-ref-max.models} from the earlier run in Table~\ref{tab:weights-spread},
+although prompts, model versions and settings were identical. Under an exchanged
+name, the distance ranges from \resval{ts-dist-min.gpt-5-4-mini-2026-03-17} to
+\resval{ts-dist-max.gpt-5-4-mini-2026-03-17} for gpt-5.4-mini-2026-03-17,
+\resval{ts-dist-min.claude-haiku-4-5-20251001} to
+\resval{ts-dist-max.claude-haiku-4-5-20251001} for claude-haiku-4-5-20251001 and
+\resval{ts-dist-min.mistral-small-2603} to \resval{ts-dist-max.mistral-small-2603}
+for mistral-small-2603.
+
+For gpt-5.4-mini-2026-03-17, the comparison delivery reliability vs.\ cost changes
+direction when the statements of the chains case appear under the name
+\emph{connectivity modules}: under the original name,
+\resval{ts-share.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue-kosten.liefertreue}
+of the runs prefer delivery reliability, under the exchanged name
+\resval{ts-share.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue-kosten.kosten}
+prefer cost. The weights move from
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.liefertreue},
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.flexibilitaet} and
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.ketten.kosten} to
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.liefertreue},
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.flexibilitaet} and
+\resval{ts-w.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule.kosten} (delivery
+reliability, flexibility, cost), a distance of
+\resval{ts-dist.gpt-5-4-mini-2026-03-17.ketten.konnektivitaetsmodule}. No other of
+the 18 combinations with an exchanged name contains such a change of direction, with
+a clear majority of \resval{ts-clear-majority} of the runs on both sides. Without
+such a change of direction, the shares of the answers shift by at least
+\resval{ts-share-shift} percentage points for gpt-5.4-mini-2026-03-17 in the
+comparison delivery reliability vs.\ cost of the battery packs case: under the
+original name, the runs prefer
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.liefertreue-kosten.kosten}
+cost and
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.batteriepacks.liefertreue-kosten.liefertreue}
+delivery reliability, under the name \emph{chains}
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.liefertreue-kosten.kosten}
+cost and
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.ketten.liefertreue-kosten.liefertreue}
+delivery reliability and under the name \emph{connectivity modules}
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.liefertreue}
+delivery reliability and
+\resval{ts-share.gpt-5-4-mini-2026-03-17.batteriepacks.konnektivitaetsmodule.liefertreue-kosten.kosten}
+cost.
+
+\begin{table}[htbp]
+  \centering\footnotesize
+  \caption{Influence of the component names: distance between the mean weight vector of a set of statements under an exchanged component name and its mean weight vector under the original name, per model (100 runs per combination). \emph{Earlier run} gives, as a reference, the distance between the rerun of the original in this experiment and the earlier run in Table~\ref{tab:weights-spread}, with identical prompts and settings. A bold value marks a combination in which at least one pairwise comparison changes direction: at least 75\% of the runs prefer one criterion under the original name and at least 75\% the other criterion under the exchanged name.}
+  \label{tab:termswap-distance}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Statements of & Earlier run & as Chains & as Battery packs & as Connectivity modules \\
+    \midrule
+    \multicolumn{5}{@{}l}{\textit{gpt-5.4-mini-2026-03-17}} \\
+    Chains & 0.072 & -- & 0.012 & \textbf{0.603} \\
+    Battery packs & 0.057 & 0.057 & -- & 0.022 \\
+    Connectivity modules & 0.008 & 0.016 & 0.026 & -- \\
+    \addlinespace
+    \multicolumn{5}{@{}l}{\textit{claude-haiku-4-5-20251001}} \\
+    Chains & 0.082 & -- & 0.082 & 0.000 \\
+    Battery packs & 0.000 & 0.029 & -- & 0.005 \\
+    Connectivity modules & 0.000 & 0.000 & 0.000 & -- \\
+    \addlinespace
+    \multicolumn{5}{@{}l}{\textit{mistral-small-2603}} \\
+    Chains & 0.017 & -- & 0.007 & 0.012 \\
+    Battery packs & 0.000 & 0.000 & -- & 0.000 \\
+    Connectivity modules & 0.004 & 0.025 & 0.021 & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering\footnotesize
+  \caption{Mean weight per criterion for each set of statements under each component name, with the difference to the original name in percentage points in parentheses, the mean consistency ratio (CR) and the number of valid runs. The first row of each block is the original name.}
+  \label{tab:termswap-weights}
+  \begin{tabular}{@{}llrrrrr@{}}
+    \toprule
+    Statements of & Name & Delivery reliability & Flexibility & Cost & CR & $n$ \\
+    \midrule
+    \multicolumn{7}{@{}l}{\textit{gpt-5.4-mini-2026-03-17}} \\
+    Chains & Chains & 0.699 & 0.053 & 0.248 & 0.339 & 100 \\
+     & Battery packs & 0.691 ($-0.8$) & 0.053 ($0.0$) & 0.256 ($+0.8$) & 0.323 & 100 \\
+     & Connectivity modules & 0.273 ($-42.6$) & 0.052 ($-0.1$) & 0.675 ($+42.7$) & 0.151 & 100 \\
+    Battery packs & Battery packs & 0.135 & 0.746 & 0.119 & 0.147 & 100 \\
+     & Chains & 0.097 ($-3.8$) & 0.743 ($-0.4$) & 0.161 ($+4.2$) & 0.033 & 100 \\
+     & Connectivity modules & 0.152 ($+1.7$) & 0.742 ($-0.5$) & 0.107 ($-1.2$) & 0.157 & 100 \\
+    Connectivity modules & Connectivity modules & 0.188 & 0.757 & 0.055 & 0.271 & 100 \\
+     & Chains & 0.197 ($+1.0$) & 0.744 ($-1.3$) & 0.058 ($+0.3$) & 0.194 & 100 \\
+     & Battery packs & 0.209 ($+2.1$) & 0.744 ($-1.3$) & 0.047 ($-0.8$) & 0.295 & 100 \\
+    \addlinespace
+    \multicolumn{7}{@{}l}{\textit{claude-haiku-4-5-20251001}} \\
+    Chains & Chains & 0.589 & 0.054 & 0.357 & 0.032 & 100 \\
+     & Battery packs & 0.648 ($+5.9$) & 0.052 ($-0.2$) & 0.300 ($-5.7$) & 0.093 & 100 \\
+     & Connectivity modules & 0.589 ($0.0$) & 0.054 ($0.0$) & 0.357 ($0.0$) & 0.032 & 100 \\
+    Battery packs & Battery packs & 0.106 & 0.701 & 0.193 & 0.008 & 100 \\
+     & Chains & 0.092 ($-1.4$) & 0.692 ($-0.9$) & 0.216 ($+2.3$) & 0.044 & 100 \\
+     & Connectivity modules & 0.107 ($0.0$) & 0.698 ($-0.3$) & 0.196 ($+0.3$) & 0.007 & 100 \\
+    Connectivity modules & Connectivity modules & 0.199 & 0.736 & 0.065 & 0.207 & 100 \\
+     & Chains & 0.199 ($0.0$) & 0.736 ($0.0$) & 0.065 ($0.0$) & 0.207 & 100 \\
+     & Battery packs & 0.199 ($0.0$) & 0.736 ($0.0$) & 0.065 ($0.0$) & 0.207 & 100 \\
+    \addlinespace
+    \multicolumn{7}{@{}l}{\textit{mistral-small-2603}} \\
+    Chains & Chains & 0.679 & 0.090 & 0.231 & 0.049 & 100 \\
+     & Battery packs & 0.675 ($-0.4$) & 0.089 ($-0.1$) & 0.236 ($+0.5$) & 0.051 & 100 \\
+     & Connectivity modules & 0.688 ($+0.9$) & 0.090 ($0.0$) & 0.222 ($-0.9$) & 0.051 & 100 \\
+    Battery packs & Battery packs & 0.170 & 0.707 & 0.122 & 0.118 & 100 \\
+     & Chains & 0.170 ($0.0$) & 0.707 ($0.0$) & 0.123 ($0.0$) & 0.117 & 100 \\
+     & Connectivity modules & 0.170 ($0.0$) & 0.707 ($0.0$) & 0.122 ($0.0$) & 0.118 & 98 \\
+    Connectivity modules & Connectivity modules & 0.187 & 0.722 & 0.092 & 0.171 & 96 \\
+     & Chains & 0.189 ($+0.2$) & 0.703 ($-1.8$) & 0.108 ($+1.6$) & 0.203 & 100 \\
+     & Battery packs & 0.191 ($+0.5$) & 0.705 ($-1.6$) & 0.103 ($+1.2$) & 0.210 & 98 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

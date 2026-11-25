@@ -1,0 +1,96 @@
+# Begriffstausch-Experiment (src/term_swap.py).
+#
+# Frage: Wie stark hängen die Urteile am Bauteilnamen selbst? Ein Modell
+# könnte aus "Batteriepack" oder "Kette" eigenes Vorwissen ableiten (Wert,
+# Kritikalität, Variantenvielfalt), statt nur die Aussagen zu gewichten.
+# Dazu bleiben die Aussagen eines Falls stehen, nur die Bauteilbegriffe
+# werden gegen die eines anderen Falls getauscht.
+#
+# Design: Lateinisches Quadrat. Mit dem Original und den zwei Rotationen läuft
+# jeder Aussagensatz genau einmal unter jedem der drei Bauteilnamen. Damit
+# lassen sich Inhalt (Aussagen) und Begriff (Bauteilname) getrennt auswerten.
+#
+# Die Fall-ID bleibt die des Inhalts (z.B. "ketten" = Aussagen des
+# Kettenfalls). Welcher Begriff im Prompt stand, steht in meta.term_swap.
+
+# Angezeigter Bauteilname je Fall (muss dem Feld component in cases.yaml
+# entsprechen; wird im Titel und in {{component}} getauscht).
+components:
+  ketten: Ketten
+  batteriepacks: Batteriepacks
+  konnektivitaetsmodule: Konnektivitätsmodule
+
+# Wortstämme des Bauteils (Kleinschreibung). Nach dem Tausch darf keiner davon
+# mehr im Titel oder in einer Aussage des Falls stehen; sonst ist eine
+# Ersetzung vergessen worden.
+stems:
+  ketten: [kette]
+  batteriepacks: [batterie, pack]
+  konnektivitaetsmodule: [konnektivität, modul]
+
+# Inhalt (Fall-ID) -> Begriff (Fall-ID, dessen Bauteilname erscheint).
+variants:
+  rot1:
+    ketten: batteriepacks
+    batteriepacks: konnektivitaetsmodule
+    konnektivitaetsmodule: ketten
+  rot2:
+    ketten: konnektivitaetsmodule
+    batteriepacks: ketten
+    konnektivitaetsmodule: batteriepacks
+
+# Ersetzungen je Fall und Kriterium. "from" muss genau einmal im Originaltext
+# stehen; "to" gibt je Zielbegriff die grammatisch angepasste Form an
+# (Artikel, Genus, Numerus). Der übrige Wortlaut bleibt zeichengleich,
+# einschließlich doppelter Leerzeichen aus cases.yaml. Als Kurzform dienen
+# wie im Original "Pack" und "Modul".
+replacements:
+  ketten:
+    liefertreue:
+      - from: "Die Kette sitzt"
+        to:
+          batteriepacks: "Das Batteriepack sitzt"
+          konnektivitaetsmodule: "Das Konnektivitätsmodul sitzt"
+    flexibilitaet:
+      - from: "Die Kettenspezifikation"
+        to:
+          batteriepacks: "Die Batteriepackspezifikation"
+          konnektivitaetsmodule: "Die Konnektivitätsmodulspezifikation"
+
+  batteriepacks:
+    flexibilitaet:
+      - from: "Vorstufen der Batteriepacks"
+        to:
+          ketten: "Vorstufen der Ketten"
+          konnektivitaetsmodule: "Vorstufen der Konnektivitätsmodule"
+    liefertreue:
+      - from: "das Pack wird"
+        to:
+          ketten: "die Kette wird"
+          konnektivitaetsmodule: "das Modul wird"
+    kosten:
+      - from: "Wert des Packs"
+        to:
+          ketten: "Wert der Kette"
+          konnektivitaetsmodule: "Wert des Moduls"
+
+  konnektivitaetsmodule:
+    kosten:
+      - from: "Die Konnektivitätsmodule laufen"
+        to:
+          ketten: "Die Ketten laufen"
+          batteriepacks: "Die Batteriepacks laufen"
+    flexibilitaet:
+      - from: "Bei den Konnektivitätsmodulen"
+        to:
+          ketten: "Bei den Ketten"
+          batteriepacks: "Bei den Batteriepacks"
+      - from: "neue Modultypen"
+        to:
+          ketten: "neue Kettentypen"
+          batteriepacks: "neue Packtypen"
+    liefertreue:
+      - from: "Einbau des Moduls"
+        to:
+          ketten: "Einbau der Kette"
+          batteriepacks: "Einbau des Packs"

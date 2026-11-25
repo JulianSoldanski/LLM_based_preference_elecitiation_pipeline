@@ -1,0 +1,89 @@
+% Erzeugt von build_extraction_tex.py aus 20261116-045546_openai_gpt-4o-2024-08-06_ketten_n20.json, 20261116-045546_openai_gpt-4o-2024-08-06_batteriepacks_n20.json, 20261116-045546_openai_gpt-4o-2024-08-06_konnektivitaetsmodule_n20.json, 20261116-045546_openai_gpt-4o-2024-08-06.json. Nicht von Hand aendern.
+% Benoetigt im Praeambel-Teil: \usepackage{booktabs}.
+\makeatletter
+\providecommand{\defresval}[2]{\expandafter\gdef\csname res@#1\endcsname{#2}}
+\providecommand{\resval}[1]{%
+  \ifcsname res@#1\endcsname\csname res@#1\endcsname\else\textbf{??#1}\fi}
+\makeatother
+
+\defresval{assignment-accuracy}{89.4\%}
+\defresval{assignment-correct}{161}
+\defresval{assignment-exact-mean}{0.89}
+\defresval{assignment-runs}{20}
+\defresval{assignment-total}{180}
+\defresval{relevance-f2-mean.all}{0.73}
+\defresval{relevance-fn-runs.all}{38}
+\defresval{relevance-fn-slots.all}{180}
+\defresval{relevance-fn.all}{38}
+\defresval{relevance-fn.batteriepacks}{11}
+\defresval{relevance-fn.ketten}{17}
+\defresval{relevance-fn.konnektivitaetsmodule}{10}
+\defresval{relevance-fp-per-run.all}{1.7}
+\defresval{relevance-precision-mean.all}{0.61}
+\defresval{relevance-precision-mean.batteriepacks}{0.62}
+\defresval{relevance-precision-mean.ketten}{0.59}
+\defresval{relevance-precision-mean.konnektivitaetsmodule}{0.61}
+\defresval{relevance-recall-mean.all}{0.79}
+\defresval{relevance-recall-mean.batteriepacks}{0.82}
+\defresval{relevance-recall-mean.ketten}{0.72}
+\defresval{relevance-recall-mean.konnektivitaetsmodule}{0.83}
+\defresval{relevance-recall-min.all}{0.67}
+\defresval{relevance-runs}{20}
+
+\begin{table}[htbp]
+  \centering\footnotesize
+  \caption{Step 1 (relevance screening): 20 repeated runs per case with gpt-4o-2024-08-06 at temperature 0 over all 63 passages of \texttt{passages\_hidden.csv}. False negatives (missed statements) are reported first because they are critical: a missed statement never reaches Gate~1. False positives are removed by the reviewer in Gate~1. Rates are pooled over all runs; recall, precision and $F_2$ are means of the per-run values.}
+  \label{tab:relevance-screening}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+     & Chains & Battery packs & Connectivity modules & All cases \\
+    \midrule
+    \multicolumn{5}{@{}l}{\textit{False negatives (critical)}} \\
+    Sought statements & 3 & 3 & 3 & 9 \\
+    Recall, mean & 0.72 & 0.82 & 0.83 & 0.79 \\
+    Recall, worst run & 0.67 & 0.67 & 0.67 & 0.67 \\
+    Missed statements & 17 / 60 & 11 / 60 & 10 / 60 & 38 / 180 \\
+    Runs with $\geq 1$ miss & 17 / 20 & 11 / 20 & 10 / 20 & 38 / 60 \\
+    \addlinespace
+    \multicolumn{5}{@{}l}{\textit{False positives (removed in Gate~1)}} \\
+    Precision, mean & 0.59 & 0.62 & 0.61 & 0.61 \\
+    Wrongly selected per run & 1.6 & 1.6 & 1.8 & 1.7 \\
+    Passages ever wrongly selected & 2 / 60 & 2 / 60 & 3 / 60 & 7 / 180 \\
+    \quad Statement on another product & 13.3\% & 26.7\% & 30.0\% & 23.3\% \\
+    \quad Near miss (same wording, other topic) & 0.0\% & 0.0\% & 0.0\% & 0.0\% \\
+    \quad Neighbour (procurement process) & 4.4\% & 0.0\% & 0.0\% & 1.5\% \\
+    \quad Off-topic & 0.0\% & 0.0\% & 0.0\% & 0.0\% \\
+    \addlinespace
+    \multicolumn{5}{@{}l}{\textit{Overall}} \\
+    $F_2$, mean & 0.68 & 0.76 & 0.76 & 0.73 \\
+    Same decision in all runs & 60 / 63 & 60 / 63 & 59 / 63 & 179 / 189 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\raggedright\scriptsize Rows under false positives give the share of runs in which a passage of that type was selected. Failed responses count as not selected (0 in all runs).
+\end{table}
+
+\begin{table}[htbp]
+  \centering\footnotesize
+  \caption{Step 3 (assignment): 20 repeated runs with gpt-4o-2024-08-06 at temperature 0 and prompt \texttt{assignment\_v3} over the 9 statements of \texttt{passages\_evaluation.csv}. For each statement: the expected criterion, how often it was assigned correctly, and the distribution of all assignments (DR delivery reliability, FR flexibility, CT cost).}
+  \label{tab:assignment-runs}
+  \begin{tabular}{@{}llcrrrrr@{}}
+    \toprule
+    Case & Statement & Expected & Correct & \multicolumn{1}{c}{DR} & \multicolumn{1}{c}{FR} & \multicolumn{1}{c}{CT} & \multicolumn{1}{c}{none} \\
+    \midrule
+    Chains & P01 & DR & 20 / 20 & \textbf{20} & -- & -- & -- \\
+     & P02 & CT & 20 / 20 & -- & -- & \textbf{20} & -- \\
+     & P03 & FR & 20 / 20 & -- & \textbf{20} & -- & -- \\
+    \addlinespace
+    Battery packs & P04 & FR & 1 / 20 & 19 & \textbf{1} & -- & -- \\
+     & P05 & DR & 20 / 20 & \textbf{20} & -- & -- & -- \\
+     & P06 & CT & 20 / 20 & -- & -- & \textbf{20} & -- \\
+    \addlinespace
+    Connectivity modules & P07 & CT & 20 / 20 & -- & -- & \textbf{20} & -- \\
+     & P08 & FR & 20 / 20 & -- & \textbf{20} & -- & -- \\
+     & P09 & DR & 20 / 20 & \textbf{20} & -- & -- & -- \\
+    \midrule
+    \multicolumn{3}{@{}l}{All statements} & 161 / 180 & \multicolumn{4}{l}{exact match per run: mean 0.89, min 0.89} \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\raggedright\scriptsize Pooled over all runs: DR precision 0.76, recall 1.00; FR precision 1.00, recall 0.68; CT precision 1.00, recall 1.00. Failed responses: 0.
+\end{table}

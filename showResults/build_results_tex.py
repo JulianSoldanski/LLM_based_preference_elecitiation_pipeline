@@ -37,6 +37,11 @@ from clean_interviews import (AUSREISSER, ERSTE_TEILNAHME, MIN_SEKUNDEN,  # noqa
                               fehlende_vergleiche, zu_schnelle_seiten)
 from transform_interviews import FAELLE, REIHENFOLGE  # noqa: E402
 
+sys.path.insert(0, str(HERE))
+import build_termswap_tex as termswap  # noqa: E402
+
+TERM_SWAP_DIR = termswap.TERM_SWAP_DIR
+
 # Feste Reihenfolge der Kriterien; muss zu den Spalten in runs.csv passen.
 CRIT = ["liefertreue", "flexibilitaet", "kosten"]
 # Paarvergleiche in runs.csv, Spalte "a:b": Matrixeintrag a_ij, also die gewaehlte
@@ -1042,8 +1047,10 @@ def comparison_section(cases: list[str], daten: dict) -> str:
 def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
           sources: list[str], cases: list[str], df: pd.DataFrame,
           level: str = "section", title: str = TITLE,
-          starred_subs: bool = True) -> str:
+          starred_subs: bool = True, term_swap: str | None = None) -> str:
     """Der Fliesstext. Alle Zahlen kommen aus \\resval, keine steht hier fest.
+    term_swap: fertiger Unterabschnitt zum Begriffstausch (build_termswap_tex.py),
+    wird ans Ende gesetzt und bekommt dieselbe Ueberschriftenebene.
 
     Reihenfolge: Stichprobe, Modelllaeufe, RQ3 (Stabilitaet, Konsistenz),
     RQ4 (Zielgewichte, Probanden). Saetze, die ein Muster beschreiben ("in
@@ -1073,6 +1080,8 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
         "(RQ3).",
         "It then compares the model weights with the weights of the participants (RQ4)."
         if daten["anker"] else "",
+        "Finally, it tests whether the component names themselves influence the model "
+        "judgements." if term_swap else "",
         "The section only describes the measured values.",
     ]))
 
@@ -1309,6 +1318,10 @@ def prose(figure_dir: str, vorhandene: dict[str, str], daten: dict,
                                 "or participants of that source.",
                                 "fig:weights-rankings", figure_dir, "0.85"))
 
+    # 5. Begriffstausch (eigener Generator, gleiche Ueberschriftenebene)
+    if term_swap:
+        teile.append(term_swap)
+
     # Ueberschriften erst hier auf die gewuenschte Ebene setzen, damit der Text
     # oben lesbar bleibt. Andere \section-Befehle kommen darin nicht vor.
     text = "\n\n".join(teile)
@@ -1348,8 +1361,19 @@ def zip_for_overleaf(out: Path, figure_dir: str, namen: dict[str, str],
 
 def build(runs: Path, out: Path, figure_dir: str, figure_ext: str,
           level: str, tex_dir: str, zip_ziel: Path | None, title: str,
-          starred_subs: bool, ground_truth: Path, survey: Path = SURVEY) -> None:
+          starred_subs: bool, ground_truth: Path, survey: Path = SURVEY,
+          term_swap_dir: Path | None = TERM_SWAP_DIR) -> None:
     df, sources, cases = load_runs(runs)
+    # Begriffstausch: fehlen die Laeufe, entfaellt der Unterabschnitt (wie bei
+    # Befragung und Zielgewichten), mit Hinweis auf der Konsole.
+    tausch_makros, tausch_text, tausch_quellen = [], None, []
+    if term_swap_dir is not None:
+        try:
+            tausch_makros, tausch_text, tausch_quellen = termswap.section(
+                *termswap.load(term_swap_dir),
+                heading=f"\\subsection{{{termswap.HEADING}}}\n\\label{{sec:results-weights-termswap}}")
+        except SystemExit as grund:
+            print(f"Begriffstausch wird ausgelassen: {grund}")
     gt = load_ground_truth(ground_truth, cases)
     vals = Values()
     daten = collect(df, sources, cases, vals, gt)
@@ -1375,14 +1399,18 @@ def build(runs: Path, out: Path, figure_dir: str, figure_ext: str,
         f"und die Abbildungen unter {join_path(tex_dir, figure_dir)}/, weil LaTeX die "
         "Abbildungspfade",
         "% gegenueber der Hauptdatei aufloest, nicht gegenueber dieser Datei.",
+        *([f"% Begriffstausch (build_termswap_tex.py) aus {', '.join(tausch_quellen)}."]
+          if tausch_text else []),
         "",
         MACRO_PREAMBLE,
         "",
         f"% {len(vals)} Werte aus den Daten.",
         *vals.lines(),
+        *([f"% {len(tausch_makros)} Werte aus dem Begriffstausch.", *tausch_makros]
+          if tausch_text else []),
         "",
         prose(graphics_path(tex_dir, figure_dir), vorhandene, daten,
-              sources, cases, df, level, title, starred_subs),
+              sources, cases, df, level, title, starred_subs, tausch_text),
         "",
     ]
     out.write_text("\n".join(kopf), encoding="utf-8")
@@ -1424,6 +1452,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--numbered-subs", action="store_true",
                         help="Unterueberschriften nummeriert und im Inhaltsverzeichnis. "
                              "Ohne die Option stehen sie in der Sternform.")
+    parser.add_argument("--term-swap-dir", type=Path, default=TERM_SWAP_DIR,
+                        help="Laeufe von src/term_swap.py fuer den Unterabschnitt zum "
+                             "Begriffstausch (Default results/term_swap). Fehlen sie, "
+                             "entfaellt der Unterabschnitt.")
+    parser.add_argument("--no-term-swap", action="store_true",
+                        help="Unterabschnitt zum Begriffstausch weglassen")
     parser.add_argument("--level", choices=["chapter", "section", "subsection"],
                         default="section",
                         help="Ebene der obersten Ueberschrift (Default section)")
@@ -1436,4 +1470,5 @@ if __name__ == "__main__":
         raise SystemExit(f"{args.runs} fehlt. Zuerst auswertung.ipynb laufen lassen.")
     build(args.runs, args.out, args.figure_dir, args.figure_ext, args.level,
           args.tex_dir, args.zip_ziel, args.title, not args.numbered_subs,
-          args.ground_truth, args.survey)
+          args.ground_truth, args.survey,
+          None if args.no_term_swap else args.term_swap_dir)
