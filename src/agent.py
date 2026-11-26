@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol, Sequence, runtime_checkable
+from typing import Any, Callable, Sequence
 
 from prompt_builder import REVISION_PROMPT, ROOT, PromptBuilder
 from schema import (
@@ -72,32 +72,35 @@ def require_key(name: str) -> None:
         )
 
 
-@runtime_checkable
-class LLMClient(Protocol):
-    """Minimale Schnittstelle, die ein Anbieter erfüllen muss."""
+def _antworttext(content: Any) -> str:
+    """Antworttext einer API-Antwort. Anthropic liefert immer eine Liste von
+    Blöcken, Mistral bei aktiviertem Reasoning; übernommen wird nur der Text."""
+    if isinstance(content, list):
+        return "".join(teil.text for teil in content if getattr(teil, "type", "") == "text")
+    return content or ""
 
-    provider: str
-    model_id: str
+
+class LLMClient:
+    """Basis der Anbieter-Clients. Jeder Client hat `provider` und `model_id`
+    und implementiert complete_chat() und complete_json()."""
 
     def complete(self, system: str, user: str, temperature: float) -> str:
-        """Liefert den Rohtext der Modellantwort auf eine einzelne Frage."""
-        ...
+        """Rohtext der Modellantwort auf eine einzelne Frage."""
+        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
 
-    def complete_chat(
-        self, system: str, messages: list[Message], temperature: float
-    ) -> str:
+    def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
         """Wie complete(), aber mit vollständigem Gesprächsverlauf."""
-        ...
+        raise NotImplementedError
 
     def complete_json(
         self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
     ) -> Completion:
         """Wie complete(), die Antwort ist aber über die API an `schema` gebunden."""
-        ...
+        raise NotImplementedError
 
 
 @dataclass
-class OpenAIClient:
+class OpenAIClient(LLMClient):
     """Standard-Client. Das SDK wird erst hier importiert, damit das Projekt
     ohne installiertes openai-Paket lauffähig bleibt (z.B. für Anthropic
     oder Tests)."""
@@ -113,16 +116,13 @@ class OpenAIClient:
 
         self._client = OpenAI()
 
-    def complete(self, system: str, user: str, temperature: float) -> str:
-        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
-
     def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
         completion = self._client.chat.completions.create(
             model=self.model_id,
             temperature=temperature,
             messages=[{"role": "system", "content": system}, *messages],
         )
-        return completion.choices[0].message.content or ""
+        return _antworttext(completion.choices[0].message.content)
 
     def complete_json(
         self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
@@ -136,11 +136,11 @@ class OpenAIClient:
                 "json_schema": {"name": name, "strict": True, "schema": schema},
             },
         )
-        return Completion(completion.choices[0].message.content or "", completion.model)
+        return Completion(_antworttext(completion.choices[0].message.content), completion.model)
 
 
 @dataclass
-class AnthropicClient:
+class AnthropicClient(LLMClient):
     """Analog zu OpenAIClient, SDK ebenfalls erst im __post_init__."""
 
     model_id: str
@@ -155,9 +155,6 @@ class AnthropicClient:
 
         self._client = Anthropic()
 
-    def complete(self, system: str, user: str, temperature: float) -> str:
-        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
-
     def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
         message = self._client.messages.create(
             model=self.model_id,
@@ -170,9 +167,7 @@ class AnthropicClient:
             # still mit ihrem Default zu laufen und die Protokolle zu verfälschen.
             extra_body={"temperature": temperature},
         )
-        return "".join(
-            block.text for block in message.content if getattr(block, "type", "") == "text"
-        )
+        return _antworttext(message.content)
 
     def complete_json(
         self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
@@ -186,14 +181,11 @@ class AnthropicClient:
             output_config={"format": {"type": "json_schema", "schema": schema}},
             extra_body={"temperature": temperature},
         )
-        text = "".join(
-            block.text for block in message.content if getattr(block, "type", "") == "text"
-        )
-        return Completion(text, message.model)
+        return Completion(_antworttext(message.content), message.model)
 
 
 @dataclass
-class MistralClient:
+class MistralClient(LLMClient):
     """Analog zu OpenAIClient, SDK (mistralai>=2) ebenfalls erst im __post_init__."""
 
     model_id: str
@@ -207,23 +199,13 @@ class MistralClient:
 
         self._client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
 
-    def complete(self, system: str, user: str, temperature: float) -> str:
-        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
-
     def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
         completion = self._client.chat.complete(
             model=self.model_id,
             temperature=temperature,
             messages=[{"role": "system", "content": system}, *messages],
         )
-        content = completion.choices[0].message.content
-        # Bei aktiviertem Reasoning kommt eine Liste von Chunks statt eines
-        # Strings; übernommen wird wie bei Anthropic nur der Antworttext.
-        if isinstance(content, list):
-            return "".join(
-                chunk.text for chunk in content if getattr(chunk, "type", "") == "text"
-            )
-        return content or ""
+        return _antworttext(completion.choices[0].message.content)
 
     def complete_json(
         self, system: str, user: str, temperature: float, name: str, schema: dict[str, Any]
@@ -237,16 +219,11 @@ class MistralClient:
                 "json_schema": {"name": name, "strict": True, "schema_definition": schema},
             },
         )
-        content = completion.choices[0].message.content
-        if isinstance(content, list):
-            content = "".join(
-                chunk.text for chunk in content if getattr(chunk, "type", "") == "text"
-            )
-        return Completion(content or "", completion.model)
+        return Completion(_antworttext(completion.choices[0].message.content), completion.model)
 
 
 @dataclass
-class EchoClient:
+class EchoClient(LLMClient):
     """Testdouble ohne Netzzugriff.
 
     Gibt die vorbereiteten Antworten der Reihe nach zurück (danach zyklisch) und
@@ -261,9 +238,6 @@ class EchoClient:
     calls: list[dict[str, Any]] = field(default_factory=list)
     fail_with: Exception | None = None
     fail_after: int | None = None
-
-    def complete(self, system: str, user: str, temperature: float) -> str:
-        return self.complete_chat(system, [{"role": "user", "content": user}], temperature)
 
     def complete_chat(self, system: str, messages: list[Message], temperature: float) -> str:
         # Kopie: der Agent hängt an dieselbe Liste weitere Nachrichten an.

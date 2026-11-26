@@ -120,13 +120,17 @@ def run_experiment(
     quiet: bool = False,
     gate1: list[dict[str, str]] | None = None,
     progress: Callable[[int, str, Response | None], None] | None = None,
+    suffix: str = "",
+    extra_meta: dict | None = None,
 ) -> tuple[Path, Path]:
     """Führt den Durchlauf aus und gibt (JSON-Pfad, Log-Pfad) zurück.
     gate1: Name und SHA-256 der Gate-1-Dateien, aus denen die Aussagen stammen
     (Artefakt, nur über den Viewer). Ohne gate1 stammen sie aus cases.yaml
     (Experiment); meta.statements_source hält das fest.
     progress(run, case_id, response) je Fall vor (response=None) und nach dem
-    Modellaufruf, nur für Fortschrittsanzeigen."""
+    Modellaufruf, nur für Fortschrittsanzeigen.
+    suffix und extra_meta: Zusatz im Dateinamen und zusätzliche Metadaten für
+    Varianten des Experiments (z.B. Begriffstausch, src/term_swap.py)."""
     start = datetime.now(timezone.utc)
     seed = resolve_seed(condition, seed)
     folgen = case_sequences(case_ids, runs, condition, seed)
@@ -135,6 +139,7 @@ def run_experiment(
         f"{start.astimezone().strftime(ZEITFORMAT_DATEI)}_"
         f"{client.provider}_{model_slug(client.model_id)}_{condition}"
         f"{EVIDENCE_SUFFIX if builder.evidence else JUSTIFICATION_SUFFIX if builder.justification else ''}"
+        f"{suffix}"
     )
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -160,6 +165,7 @@ def run_experiment(
         "sequences": folgen,
         "statements_source": "gate1" if gate1 else "cases.yaml",
         "gate1": gate1,
+        **(extra_meta or {}),
         "prompts": prompts,
     }
     antworten: list[Response] = []
